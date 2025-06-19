@@ -3,15 +3,15 @@ import mongoose from "mongoose";
 const merchantUserSchema = new mongoose.Schema({
   name: {
     type: String,
-    require: true,
+    required: true,
   },
   email: {
     type: String,
-    require: true,
+    required: true,
   },
   phoneNumber: {
     type: String,
-    require: true,
+    required: true,
   },
   haveParkingLot: {
     type: Boolean,
@@ -36,21 +36,21 @@ const parkingLotSchema = new mongoose.Schema({
         type : mongoose.Types.ObjectId,
         ref : "MerchantUser"
     },
-    name : {
+    parkingName : {
         type : String , 
-        require: true
+        required: true
     },
     address : {
         type : String , 
-        require: true
+        required: true
     },
     price : {
         type: Number,
-        require : true ,
+        required : true ,
     },
     about : {
         type : String ,
-        require : true ,
+        required : true ,
     },
     spacesList : {
         type : mongoose.Schema.Types.Map ,
@@ -58,8 +58,31 @@ const parkingLotSchema = new mongoose.Schema({
     }
 }, {timestamps: true})
 
+const lotRentRecordSchema = new mongoose.Schema({
+    lotDetails : {
+        type: mongoose.Schema.Types.ObjectId,
+        ref : "ParkingLot",
+    },
+    renterInfo : {
+        type: mongoose.Schema.Types.ObjectId ,
+        // ref : "User"
+    },
+    rentedSlot : {
+        type: String , // Zone + Number
+        required : true ,
+    },
+    rentFrom : {
+        type : mongoose.Schema.Types.Date ,
+        required : true ,
+    },
+    rentTo : {
+        type: mongoose.Schema.Types.Date,
+        required: true
+    },
+})
 
 const MerchantModel = mongoose.model("MerchantUser",merchantUserSchema) ;
 const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
+const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
 
-export {MerchantModel , ParkingLotModel} ;
+export {MerchantModel , ParkingLotModel, LotRentRecordModel} ;
