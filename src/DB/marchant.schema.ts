@@ -29,4 +29,37 @@ const merchantUserSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-});
+}, {timestamps : true});
+
+const parkingLotSchema = new mongoose.Schema({
+    owner : {
+        type : mongoose.Types.ObjectId,
+        ref : "MerchantUser"
+    },
+    name : {
+        type : String , 
+        require: true
+    },
+    address : {
+        type : String , 
+        require: true
+    },
+    price : {
+        type: Number,
+        require : true ,
+    },
+    about : {
+        type : String ,
+        require : true ,
+    },
+    spacesList : {
+        type : mongoose.Schema.Types.Map ,
+        of : Number,
+    }
+}, {timestamps: true})
+
+
+const MerchantModel = mongoose.model("MerchantUser",merchantUserSchema) ;
+const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
+
+export {MerchantModel , ParkingLotModel} ;
