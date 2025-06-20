@@ -1,23 +1,29 @@
-import express, { Application } from "express";
+import express, { Application, Request, Response } from "express";
 import dotenv from "dotenv";
 import { connectDB } from "./DB/mongodb.js";
+import userRoutes from "./routes/routes.js";
 
 dotenv.config({
-  path: ".env",
+  path: "./.env",
 });
 
 const app: Application = express();
-const PORT: number = parseInt(process.env.PORT || "5000");
+const PORT: number = parseInt(process.env.PORT || "5000", 10);
 
-// Connect to MongoDB first
+app.use(express.json());
+
+// Hook up your user routes
+app.use("/api/users", userRoutes);
+
+app.get("/", (req: Request, res: Response) => {
+  res.status(200).send("Welcome To Vervour");
+});
+
+// Connect DB and start server
 connectDB().then(() => {
-  // Then start the server
   app.listen(PORT, () => {
     console.log("✅ Server Started at", PORT);
   });
-});
-
-// Simple route
-app.get("/", (req, res) => {
-  res.send("Welcome To Vervour").status(200);
+}).catch((err) => {
+  console.error("❌ MongoDB connection error:", err);
 });

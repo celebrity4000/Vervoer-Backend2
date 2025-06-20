@@ -1,66 +1,23 @@
 import { Request, Response, NextFunction } from "express";
 import { User } from "../models/user.model.js";
-import { ApiError } from "../utils/apierror.js";
-import { asyncHandler } from "../utils/asynchandler.js";
-import { ApiResponse } from "../utils/apirespone.js";
-import bcrypt from "bcrypt"
-type UserType =  "user" | "merchant" | "driver" ;
+import { sendEmail, generateOTP,getOtpExpiry } from "../utils/mailer.utils.js";
+import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 
+export const registerUser = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { phoneNumber, password, firstName, lastName, email, country, state, zipCode, userType } = req.body;
 
-export const registerUser = asyncHandler(
-  async (req: Request, res: Response, next: NextFunction) => {
-    const {
-      phoneNumber,
-      password,
-      confirmPassword,
-      firstName,
-      lastName,
-      email,
-      country,
-      state,
-      zipCode,
-      userType,
-    } = req.body;
-
-    // Validate required fields
-    if (
-      !phoneNumber ||
-      !password ||
-      !confirmPassword ||
-      !firstName ||
-      !lastName ||
-      !email ||
-      !country ||
-      !state ||
-      !zipCode
-    ) {
-      throw new ApiError(400, "All fields are required.");
-    }
-
-    // Password match check
-    if (password !== confirmPassword) {
-      throw new ApiError(400, "Password and Confirm Password do not match.");
-    }
-
-    // Validate userType if provided
-    const validUserTypes: UserType[] = ["user", "merchant", "driver"];
-    if (userType && !validUserTypes.includes(userType)) {
-      throw new ApiError(400, `Invalid userType. Allowed values are: ${validUserTypes.join(", ")}`);
-    }
-
-    // Check if user already exists
-    const existingUser = await User.findOne({
-      $or: [{ email }, { phoneNumber }],
-    });
-
+    const existingUser = await User.findOne({ phoneNumber });
     if (existingUser) {
-      throw new ApiError(400, "User with given email or phone number already exists.");
+      res.status(400).json({ success: false, message: "Phone number already registered" });
+      return;
     }
 
-    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
+    const otp = generateOTP();
+    const otpExpiry = getOtpExpiry();
 
-    // Create new user
     const newUser = await User.create({
       phoneNumber,
       password: hashedPassword,
@@ -70,12 +27,67 @@ export const registerUser = asyncHandler(
       country,
       state,
       zipCode,
-      userType: userType || "user", // default to 'user' if not provided
+      userType,
+      otp,
+      otpExpiry,
     });
 
-    // Respond with success
-    res.status(201).json(
-      new ApiResponse(201, newUser, "User registered successfully.")
+    await sendEmail(email, "Your Registration OTP", `Your OTP is: ${otp}`);
+
+    const token = jwt.sign(
+      { _id: newUser._id, userType: newUser.userType },
+      process.env.JWT_SECRET as string,
+      { expiresIn: "7d" }
     );
+   console.log("Saved OTP in DB:", newUser.otp);
+
+
+    res.status(201).json({
+      success: true,
+      message: "User registered successfully, OTP sent to email",
+      token,
+    });
+  } catch (error) {
+    next(error);
   }
-);
+};
+
+
+export const verifyOtp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { otp } = req.body;
+    const token = req.headers.authorization?.split(" ")[1];
+
+    if (!token) {
+      return res.status(401).json({ success: false, message: "Token missing" });
+    }
+
+    const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+    const user = await User.findById(decoded._id);
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    if (user.isVerified) {
+      return res.status(400).json({ success: false, message: "User already verified" });
+    }
+
+    if (user.otp !== otp) {
+      return res.status(400).json({ success: false, message: "Invalid OTP" });
+    }
+
+    if (user.otpExpiry && user.otpExpiry < new Date()) {
+      return res.status(400).json({ success: false, message: "OTP expired" });
+    }
+
+    user.isVerified = true;
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+    await user.save();
+    
+
+    res.status(200).json({ success: true, message: "Account verified successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
