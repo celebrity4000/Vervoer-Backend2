@@ -1,6 +1,11 @@
 import { Request, Response, NextFunction } from "express";
 import { User } from "../models/user.model.js";
-import { ApiError } from "../utils/";
+import { ApiError } from "../utils/apierror.js";
+import { asyncHandler } from "../utils/asynchandler.js";
+import { ApiResponse } from "../utils/apirespone.js";
+import bcrypt from "bcrypt"
+type UserType =  "user" | "merchant" | "driver" ;
+
 
 export const registerUser = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
