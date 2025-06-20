@@ -27,3 +27,9 @@ connectDB().then(() => {
 }).catch((err) => {
   console.error("❌ MongoDB connection error:", err);
 });
+
+// Simple route
+app.use(express.json());
+app.get("/", (req, res) => {
+  res.send("Welcome To Vervour").status(200);
+});

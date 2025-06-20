@@ -2,12 +2,12 @@ export class ApiError extends Error {
   public statusCode: number;
   public data: null;
   public success: boolean;
-  public errors: unknown[];
+  public errors: unknown[] | unknown;
 
   constructor(
     statusCode: number,
     message = "Something went wrong",
-    errors: unknown[] = [],
+    errors: unknown[] | unknown= [],
     stack = ""
   ) {
     super(message);
