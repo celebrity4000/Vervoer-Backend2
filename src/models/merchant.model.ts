@@ -89,6 +89,23 @@ const lotRentRecordSchema = new mongoose.Schema({
     },
 })
 
+const dryCleanerSchema = new mongoose.Schema({
+    name: { type: String, required: true },
+  address: { type: String, required: true },
+  rating: { type: Number, default: 0 },
+  about: { type: String },
+  contactName: { type: String, required: true },
+  contactPhone: { type: String, required: true },
+  imageUrl: { type: String },
+  hours: [
+    {
+      day: { type: String, required: true },
+      open: { type: String, required: true },
+      close: { type: String, required: true },
+    },
+  ],
+})
+
 export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
 export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
 
