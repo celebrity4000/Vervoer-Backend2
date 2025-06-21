@@ -1,6 +1,5 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
-import { required } from "zod/v4-mini";
 
 export interface IMerchant extends Document {
   phoneNumber: string;
@@ -45,6 +44,9 @@ const parkingLotSchema = new mongoose.Schema({
         type : mongoose.Types.ObjectId,
         ref : "Merchant"
     },
+    totalSlot : {
+      type : Number ,
+    },
     parkingName : {
         type : String , 
         required: true
@@ -68,7 +70,7 @@ const parkingLotSchema = new mongoose.Schema({
 }, {timestamps: true})
 
 const lotRentRecordSchema = new mongoose.Schema({
-    lotDetails : {
+    lotId : {
         type: mongoose.Schema.Types.ObjectId,
         ref : "ParkingLot",
     },

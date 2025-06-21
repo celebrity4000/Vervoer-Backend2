@@ -15,7 +15,7 @@ app.use(express.json());
 
 // Hook up your user routes
 app.use("/api/users", userRoutes);
-app.use("api/merchant", merchantRouter) ;
+app.use("/api/merchants", merchantRouter) ;
 
 app.get("/", (req: Request, res: Response) => {
   res.status(200).send("Welcome To Vervour");

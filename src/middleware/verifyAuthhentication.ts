@@ -45,7 +45,7 @@ export async function verifyAuthentication(req: Request){
         if(error instanceof jwt.TokenExpiredError){
             throw new ApiError(400, "TOKEN_EXPIRED")
         }else if (error instanceof jwt.JsonWebTokenError){
-            throw new ApiError(401 , "UNAUTHORIZED_ACCESS") ;
+            throw new ApiError(401 , "UNAUTHORIZED_ACCESS",error) ;
         }else if(error instanceof z.ZodError){
             throw new ApiError(401, "UNKNOWN_TOKEN") ;
         }
