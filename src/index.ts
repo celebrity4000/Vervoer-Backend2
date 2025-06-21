@@ -2,6 +2,7 @@ import express, { Application, Request, Response } from "express";
 import dotenv from "dotenv";
 import { connectDB } from "./DB/mongodb.js";
 import userRoutes from "./routes/routes.js";
+import merchantRouter from "./routes/merchant.routes.js";
 
 dotenv.config({
   path: "./.env",
@@ -14,6 +15,7 @@ app.use(express.json());
 
 // Hook up your user routes
 app.use("/api/users", userRoutes);
+app.use("api/merchant", merchantRouter) ;
 
 app.get("/", (req: Request, res: Response) => {
   res.status(200).send("Welcome To Vervour");
