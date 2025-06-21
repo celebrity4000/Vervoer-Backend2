@@ -92,13 +92,14 @@ const lotRentRecordSchema = new mongoose.Schema({
 
 const drycleanerSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
+    shopname: { type: String, required: true },
     address: { type: String, required: true },
     rating: { type: Number, default: 0 },
     about: { type: String },
     contactPerson: { type: String, required: true },
     phoneNumber: { type: String, required: true },
-    image: { type: String },
+    contactPersonImg: { type: String },
+    shopimage: [{ type: String }],
     hoursOfOperation: [
       {
         day: { type: String },
@@ -110,8 +111,10 @@ const drycleanerSchema = new mongoose.Schema(
       {
         name: { type: String },
         category: { type: String , required: true },
+        strachLevel: { type: Number, enum: [1, 2, 3, 4, 5], default: 3 },
+        washOnly: { type: Boolean, default: false },
+        additionalservice: { type:String,enum:["zipper","button","wash/fold"], },
         price: { type: Number },
-        options: [{ type: String }],
       },
     ],
     orders: [
