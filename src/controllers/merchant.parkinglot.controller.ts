@@ -167,3 +167,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
     }
   }
 });
+
+// dry cleaner controller
+

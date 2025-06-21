@@ -22,10 +22,10 @@ app.get("/", (req: Request, res: Response) => {
 // Connect DB and start server
 connectDB().then(() => {
   app.listen(PORT, () => {
-    console.log("✅ Server Started at", PORT);
+    console.log(" Server Started at", PORT);
   });
 }).catch((err) => {
-  console.error("❌ MongoDB connection error:", err);
+  console.error(" MongoDB connection error:", err);
 });
 
 // Simple route

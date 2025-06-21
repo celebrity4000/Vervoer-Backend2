@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
+import { required } from "zod/v4-mini";
 
 export interface IMerchant extends Document {
   phoneNumber: string;
@@ -89,23 +90,43 @@ const lotRentRecordSchema = new mongoose.Schema({
     },
 })
 
-const dryCleanerSchema = new mongoose.Schema({
+const drycleanerSchema = new mongoose.Schema(
+  {
     name: { type: String, required: true },
-  address: { type: String, required: true },
-  rating: { type: Number, default: 0 },
-  about: { type: String },
-  contactName: { type: String, required: true },
-  contactPhone: { type: String, required: true },
-  imageUrl: { type: String },
-  hours: [
-    {
-      day: { type: String, required: true },
-      open: { type: String, required: true },
-      close: { type: String, required: true },
-    },
-  ],
-})
+    address: { type: String, required: true },
+    rating: { type: Number, default: 0 },
+    about: { type: String },
+    contactPerson: { type: String, required: true },
+    phoneNumber: { type: String, required: true },
+    image: { type: String },
+    hoursOfOperation: [
+      {
+        day: { type: String },
+        open: { type: String },
+        close: { type: String },
+      },
+    ],
+    services: [
+      {
+        name: { type: String },
+        category: { type: String , required: true },
+        price: { type: Number },
+        options: [{ type: String }],
+      },
+    ],
+    orders: [
+      {
+        serviceName: { type: String },
+        quantity: { type: Number },
+        price: { type: Number },
+        status: { type: String, enum: ["active", "completed"], default: "active" },
+      },
+    ],
+  },
+  { timestamps: true }
+);
 
+export const DryCleaner = mongoose.model("DryCleaner", drycleanerSchema );
 export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
 export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
 
