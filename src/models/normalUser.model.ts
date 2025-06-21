@@ -18,7 +18,6 @@ export interface IUser extends Document {
 const UserSchema = new Schema(
   {
     ...UserBaseSchemaFields,
-    dateOfBirth: { type: Date },
   },
   { timestamps: true }
 );

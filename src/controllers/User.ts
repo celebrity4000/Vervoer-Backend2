@@ -6,6 +6,9 @@ import { User } from "../models/normalUser.model.js";
 import { sendEmail, generateOTP, getOtpExpiry } from "../utils/mailer.utils.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
+import { registerUserSchema } from "../validators/userValidators.js";
+import { z } from "zod/v4";
+import { ApiError } from "../utils/apierror.js";
 
 export const registerUser = async (
   req: Request,
@@ -22,11 +25,8 @@ export const registerUser = async (
       country,
       state,
       zipCode,
-      userType,
-      haveGarage, // for merchant
-      haveParkingLot, // for driver
-      dateOfBirth, // for regular user
-    } = req.body;
+      userType, 
+    } = registerUserSchema.parse(req.body);
 
     // const existingUser = await User.findOne({ phoneNumber });
     // if (existingUser) {
@@ -40,7 +40,7 @@ export const registerUser = async (
     const otp = generateOTP();
     const otpExpiry = getOtpExpiry();
 
-    let newUser;
+    let newUser = null;
 
     if (userType === "merchant") {
       newUser = await Merchant.create({
@@ -53,7 +53,6 @@ export const registerUser = async (
         state,
         zipCode,
         userType,
-        haveGarage,
         otp,
         otpExpiry,
       });
@@ -68,7 +67,6 @@ export const registerUser = async (
         state,
         zipCode,
         userType,
-        haveParkingLot,
         otp,
         otpExpiry,
       });
@@ -84,7 +82,6 @@ export const registerUser = async (
         state,
         zipCode,
         userType,
-        dateOfBirth,
         otp,
         otpExpiry,
       });
@@ -93,7 +90,7 @@ export const registerUser = async (
     await sendEmail(email, "Your Registration OTP", `Your OTP is: ${otp}`);
 
     const token = jwt.sign(
-      { _id: newUser._id, userType: newUser.userType },
+      { _id: newUser._id, userType: userType },
       process.env.JWT_SECRET as string,
       { expiresIn: "7d" }
     );
@@ -104,6 +101,9 @@ export const registerUser = async (
       token,
     });
   } catch (error) {
+    if(error instanceof z.ZodError){
+      throw new ApiError(400, "INVALID_DATA") ;
+    }
     next(error);
   }
 };
@@ -118,29 +118,34 @@ export const verifyOtp = async (
     const token = req.headers.authorization?.split(" ")[1];
 
     if (!token) {
-      return res.status(401).json({ success: false, message: "Token missing" });
+       res.status(401).json({ success: false, message: "Token missing" });
+       return
     }
 
     const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
     const user = await User.findById(decoded._id);
     if (!user) {
-      return res
-        .status(404)
-        .json({ success: false, message: "User not found" });
+      res
+      .status(404)
+      .json({ success: false, message: "User not found" });
+      return ;
     }
 
     if (user.isVerified) {
-      return res
-        .status(400)
-        .json({ success: false, message: "User already verified" });
+      res
+      .status(400)
+      .json({ success: false, message: "User already verified" });
+      return
     }
 
     if (user.otp !== otp) {
-      return res.status(400).json({ success: false, message: "Invalid OTP" });
+      res.status(400).json({ success: false, message: "Invalid OTP" });
+      return
     }
 
     if (user.otpExpiry && user.otpExpiry < new Date()) {
-      return res.status(400).json({ success: false, message: "OTP expired" });
+      res.status(400).json({ success: false, message: "OTP expired" });
+      return ;
     }
 
     user.isVerified = true;

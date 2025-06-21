@@ -1,5 +1,4 @@
-import { LotRentRecordModel } from "../DB/marchant.schema.js";
-
+import { LotRentRecordModel } from "../models/merchant.model.js"
 export async function getRecordList(date : Date , ID : String){
     let bookingRecord = await LotRentRecordModel.find({
         $and :[

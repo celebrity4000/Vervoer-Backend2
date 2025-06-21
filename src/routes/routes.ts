@@ -2,12 +2,13 @@ import { Router } from "express";
 import { registerUser,verifyOtp } from "../controllers/User.js";  
 import {validateRequest} from "../middleware/validateRequest.js";
 import { registerUserSchema } from "../validators/userValidators.js";
+import { asyncHandler } from "../utils/asynchandler.js";
 
 const router = Router();
 
 
-router.post("/register", validateRequest(registerUserSchema), registerUser);
-router.post("/verify-otp", verifyOtp);
+router.post("/register", asyncHandler(registerUser));
+router.post("/verify-otp", asyncHandler(verifyOtp));
 
 
 export default router;
