@@ -12,7 +12,7 @@ export const BookingData = z.object({
     rentFrom : z.iso.date() ,
     rentTo : z.iso.date() ,
     lotId: z.string(),
-    rentedSlot: z.string().regex(/^[A-Z]{0,3} \d{3}$/).describe("SLOT must be a string 3 maximum capital letter and a space and exactly 3 digit example `A 001` or `AAA 001` not `AAAA 001`   ")
+    rentedSlot: z.object({zone : z.string().regex(/[A-Z]{1,3}/) ,slot : z.number().lt(1000).positive() }) 
 
 })
 export type BookingData = z.infer<typeof BookingData> 

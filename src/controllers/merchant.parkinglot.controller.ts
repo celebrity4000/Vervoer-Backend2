@@ -10,15 +10,14 @@ import z from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { getAllDate } from "../utils/opt.utils.js";
-import { getRecordList } from "../utils/lotProcessData.js";
-import { assert } from "console";
+import { generateParkingSpaceID, getRecordList } from "../utils/lotProcessData.js";
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
 
     try {
       const rData = ParkingData.parse(req.body);
-      const ownerID = req.body.user.id;
+      const ownerID = "USER_ID";
 
       const owner = await Merchant.findById(ownerID);
       if (
@@ -92,6 +91,12 @@ export const bookASolt = asyncHandler(async (req, res) => {
     const userID = "SomeID";
     const rData = BookingData.parse(req.body);
     let session = null;
+    // check the lotId is available 
+    const parkingLot = await ParkingLotModel.findById(rData.lotId) ;
+    if(!parkingLot) throw new ApiError(400, "INVALID_LOTID") ;
+    if(parkingLot && (parkingLot.spacesList?.get(rData.rentedSlot.zone)||0)>= rData.rentedSlot.slot) {
+      throw new ApiError(400, "INVALID_SELECTED_ZONE") ;
+    }
     LotRentRecordModel.createCollection()
       .then(() => LotRentRecordModel.startSession())
       .then(async (_session) => {
@@ -101,7 +106,7 @@ export const bookASolt = asyncHandler(async (req, res) => {
         const result = await LotRentRecordModel.find(
           {
             lotId: rData.lotId,
-            rentedSlot: rData.rentedSlot,
+            rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
             $or: [
               {
                 $and: [
@@ -134,14 +139,14 @@ export const bookASolt = asyncHandler(async (req, res) => {
         const booked = await LotRentRecordModel.create(
           {
             lotId: rData.lotId,
-            rentedSlot: rData.rentedSlot,
+            rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
             rentFrom: rData.rentFrom,
             rentTo: rData.rentTo,
             renterInfo: userID,
           },
           { session: session }
         );
-        assert(booked.length == 1, "Some Thing Went wrong");
+        if(booked?.length != 1) new ApiError(400,"FAILED BOOKING");
         await (await booked[0].populate("renterInfo")).populate("lotId");
         if (booked) {
           res
