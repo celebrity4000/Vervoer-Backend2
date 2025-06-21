@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { MerchantModel, ParkingLotModel } from "../DB/marchant.schema.js";
+import { Merchant, ParkingLotModel } from "../models/merchant.model.js";
 
 interface ParkingReqBody {
 parkingName? : string ,
@@ -14,7 +14,7 @@ async function registerParkingLot(req: Request , res : Response) {
     const rData = req.body as ParkingReqBody
     const ownerID = req.body.user.id;
 
-    const owner = await MerchantModel.findById(ownerID) ;
+    const owner = await Merchant.findById(ownerID) ;
     if(!(rData.about && rData.address && rData.availableSpace && rData.parkingName && rData.price)){
         res.status(400).send("DATA NOT AVAILABLE")
     }

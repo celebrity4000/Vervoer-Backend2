@@ -19,9 +19,81 @@ export interface IMerchant extends Document {
 const MerchantSchema = new Schema(
   {
     ...UserBaseSchemaFields,
-    haveGarage: { type: Boolean, default: false },
+    haveParkingLot: {
+      type: Boolean,
+      default: false,
+    },
+    haveGarage: {
+      type: Boolean,
+      default: false,
+    },
+    haveDryCleaner: {
+      type: Boolean,
+      default: false,
+    },
+    haveResidenceParking: {
+      type: Boolean,
+      default: false,
+    },
   },
   { timestamps: true }
 );
 
-export const Merchant = mongoose.model<IMerchant>("Merchant", MerchantSchema, "merchants");
+const parkingLotSchema = new mongoose.Schema({
+    owner : {
+        type : mongoose.Types.ObjectId,
+        ref : "Merchant"
+    },
+    parkingName : {
+        type : String , 
+        required: true
+    },
+    address : {
+        type : String , 
+        required: true
+    },
+    price : {
+        type: Number,
+        required : true ,
+    },
+    about : {
+        type : String ,
+        required : true ,
+    },
+    spacesList : {
+        type : mongoose.Schema.Types.Map ,
+        of : Number,
+    }
+}, {timestamps: true})
+
+const lotRentRecordSchema = new mongoose.Schema({
+    lotDetails : {
+        type: mongoose.Schema.Types.ObjectId,
+        ref : "ParkingLot",
+    },
+    renterInfo : {
+        type: mongoose.Schema.Types.ObjectId ,
+        // ref : "User"
+    },
+    rentedSlot : {
+        type: String , // Zone + Number
+        required : true ,
+    },
+    rentFrom : {
+        type : mongoose.Schema.Types.Date ,
+        required : true ,
+    },
+    rentTo : {
+        type: mongoose.Schema.Types.Date,
+        required: true
+    },
+})
+
+export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
+export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
+
+export const Merchant = mongoose.model<IMerchant>(
+  "Merchant",
+  MerchantSchema,
+  "merchants"
+);
