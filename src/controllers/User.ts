@@ -1,5 +1,4 @@
 import { Request, Response, NextFunction } from "express";
-import { UserBaseSchemaFields } from "../models/user.model.js";
 import { Merchant } from "../models/merchant.model.js";
 import { Driver } from "../models/driver.model.js";
 import { User } from "../models/normalUser.model.js";
