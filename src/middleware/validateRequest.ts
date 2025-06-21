@@ -10,7 +10,7 @@ export const validateRequest = (schema: ZodSchema) => (req: Request, res: Respon
       path: err.path,
     }));
 
-    return res.status(400).json({
+    return res.status(401).json({
       success: false,
       message: "Validation failed",
       errors,
