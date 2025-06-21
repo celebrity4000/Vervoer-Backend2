@@ -9,6 +9,8 @@ import bcrypt from "bcryptjs";
 import { registerUserSchema } from "../validators/userValidators.js";
 import { z } from "zod/v4";
 import { ApiError } from "../utils/apierror.js";
+import { jwtEncode } from "../utils/jwt.js";
+import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 
 export const registerUser = async (
   req: Request,
@@ -86,14 +88,11 @@ export const registerUser = async (
         otpExpiry,
       });
     }
+    console.log(`Generated OTP is ${otp} for user ${newUser._id}`)
 
     await sendEmail(email, "Your Registration OTP", `Your OTP is: ${otp}`);
 
-    const token = jwt.sign(
-      { _id: newUser._id, userType: userType },
-      process.env.JWT_SECRET as string,
-      { expiresIn: "7d" }
-    );
+    const token = jwtEncode({ userId: newUser._id, userType: userType });
 
     res.status(201).json({
       success: true,
@@ -115,15 +114,7 @@ export const verifyOtp = async (
 ) => {
   try {
     const { otp } = req.body;
-    const token = req.headers.authorization?.split(" ")[1];
-
-    if (!token) {
-       res.status(401).json({ success: false, message: "Token missing" });
-       return
-    }
-
-    const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
-    const user = await User.findById(decoded._id);
+    const user = await verifyAuthentication(req).then(e=>e?.user) ;
     if (!user) {
       res
       .status(404)
@@ -157,6 +148,11 @@ export const verifyOtp = async (
       .status(200)
       .json({ success: true, message: "Account verified successfully" });
   } catch (error) {
+    if(error instanceof jwt.TokenExpiredError){
+      throw new ApiError(400, "TOKEN_EXPIRED")
+    }else if (error instanceof jwt.JsonWebTokenError){
+      throw new ApiError(401 , "UNAUTHORIZED_ACCESS") ;
+    }
     next(error);
   }
 };

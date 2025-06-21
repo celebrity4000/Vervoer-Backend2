@@ -11,15 +11,18 @@ import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { getAllDate } from "../utils/opt.utils.js";
 import { generateParkingSpaceID, getRecordList } from "../utils/lotProcessData.js";
+import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
-
     try {
       const rData = ParkingData.parse(req.body);
-      const ownerID = "USER_ID";
-
-      const owner = await Merchant.findById(ownerID);
+      const verifiedAuth = await verifyAuthentication(req) ;
+      let owner = null ;
+      if(verifiedAuth?.userType !== "merchant") {
+        throw new ApiError(400, "INVALID_USER") ;
+      }
+      owner = verifiedAuth.user ;
       if (
         !(
           rData.about &&
@@ -85,7 +88,7 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
   }
 });
 
-export const bookASolt = asyncHandler(async (req, res) => {
+export const bookASlot = asyncHandler(async (req, res) => {
   //TODO: AUTHENTICATE USER
   try {
     const userID = "SomeID";
