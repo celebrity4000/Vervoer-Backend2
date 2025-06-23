@@ -39,10 +39,24 @@ const MerchantSchema = new Schema(
   { timestamps: true }
 );
 
+export const Merchant = mongoose.model<IMerchant>(
+  "Merchant",
+  MerchantSchema,
+  "merchants"
+);
 const parkingLotSchema = new mongoose.Schema({
+    images : [String],
     owner : {
         type : mongoose.Types.ObjectId,
         ref : "Merchant"
+    },
+    contactNumber : {
+      type : String ,
+      required : true
+    },
+    email : {
+      type : String ,
+      required : true
     },
     totalSlot : {
       type : Number ,
@@ -55,6 +69,17 @@ const parkingLotSchema = new mongoose.Schema({
         type : String , 
         required: true
     },
+    gpsLocation: {
+      type : {
+        type : String ,
+        enum : "Point",
+        default : "Point",
+      },
+      coordinate : {
+        type : [Number],
+        required : true ,
+      },
+  },
     price : {
         type: Number,
         required : true ,
@@ -66,9 +91,48 @@ const parkingLotSchema = new mongoose.Schema({
     spacesList : {
         type : mongoose.Schema.Types.Map ,
         of : Number,
-    }
-}, {timestamps: true})
+    },
+    generalAvailable: [{
+      day: {
+        type: String,
+        enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
+        required: true
+      },
+      isOpen: {
+        type: Boolean,
+        default: true
+      },
+      openTime: String,
+      closeTime: String,
+      is24Hours: {
+        type: Boolean,
+        default: false
+      }
+    }],
+    is24x7: Boolean ,
+    isActive : {type : Boolean , default : true },
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+})
 
+parkingLotSchema.index({ location: '2dsphere' });
+parkingLotSchema.methods.isOpenNow = function() {
+  const now = new Date();
+  const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
+  
+  const todayHours = this.generalAvailable.find(ga => ga.day === today);
+  
+  if (!todayHours || !todayHours.isOpen) return false;
+  if (todayHours.is24Hours) return true;
+  
+  const currentTime = now.getHours() * 100 + now.getMinutes();
+  const openTime = parseInt(todayHours.openTime.replace(':', ''));
+  const closeTime = parseInt(todayHours.closeTime.replace(':', ''));
+  
+  return currentTime >= openTime && currentTime <= closeTime;
+};
 const lotRentRecordSchema = new mongoose.Schema({
     lotId : {
         type: mongoose.Schema.Types.ObjectId,
@@ -91,6 +155,9 @@ const lotRentRecordSchema = new mongoose.Schema({
         required: true
     },
 })
+
+export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
+export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
 
 const drycleanerSchema = new mongoose.Schema(
   {
@@ -128,15 +195,11 @@ const drycleanerSchema = new mongoose.Schema(
       },
     ],
   },
-  { timestamps: true }
+  { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+}
 );
 
 export const DryCleaner = mongoose.model("DryCleaner", drycleanerSchema );
-export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
-export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
-
-export const Merchant = mongoose.model<IMerchant>(
-  "Merchant",
-  MerchantSchema,
-  "merchants"
-);

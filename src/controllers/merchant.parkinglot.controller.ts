@@ -31,7 +31,7 @@ export const registerParkingLot = asyncHandler(
           rData.address &&
           rData.spacesList &&
           rData.parkingName &&
-          rData.price
+          rData.price 
         )
       ) {
         throw new ApiError(400, "DATA VALIDATION");
@@ -46,6 +46,7 @@ export const registerParkingLot = asyncHandler(
         price: rData.price,
         address: rData.address,
         spacesList: rData.spacesList,
+        generalAvailable : rData.generalAvailabel ,
       });
 
       await newParkingLot.save();
@@ -58,6 +59,46 @@ export const registerParkingLot = asyncHandler(
     }
   }
 );
+
+export const editParkingLot = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const parkingLotId = z.string().parse(req.params.id);
+    const updateData = ParkingData.parse(req.body);
+    const verifiedAuth = await verifyAuthentication(req);
+
+    if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
+      throw new ApiError(400, "UNAUTHORIZED");
+    }
+
+    // Find the parking lot and verify ownership
+    const parkingLot = await ParkingLotModel.findById(parkingLotId);
+    if (!parkingLot) {
+      throw new ApiError(404, "PARKING_LOT_NOT_FOUND");
+    }
+
+    if (parkingLot.owner && verifiedAuth.user && parkingLot.owner.toString() !== verifiedAuth.user?._id?.toString()) {
+      throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+    }
+
+    // Update the parking lot with new data
+    const updatedParkingLot = await ParkingLotModel.findByIdAndUpdate(
+      parkingLotId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ); 
+
+    if (!updatedParkingLot) {
+      throw new ApiError(500, "FAILED_TO_UPDATE_PARKING_LOT");
+    }
+
+    res.status(200).json(new ApiResponse(200, { parkingLot: updatedParkingLot }));
+  } catch (err) {
+    if (err instanceof z.ZodError) {
+      throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
+    }
+    throw err;
+  }
+});
 
 export const getAvailableSpace = asyncHandler(async (req, res) => {
   try {

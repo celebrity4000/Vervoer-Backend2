@@ -1,3 +1,4 @@
+import { createContext } from "vm";
 import {z} from "zod/v4"
 
 export const ParkingData = z.object({
@@ -5,7 +6,24 @@ export const ParkingData = z.object({
     address: z.string().optional(),
     price: z.number().optional(),
     about: z.string().optional(),
-    spacesList: z.record(z.string().regex(/^[A-Z]+$/),z.number()).optional()
+    spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.number()).optional(),
+    generalAvailabel: z.array(z.object({
+        day : z.enum(["SUN", "MON", "THU", "WED", "THR", "FRI", "SAT"]),
+        closingTime : z.iso.time(),
+        openingTime : z.iso.time(),
+    })).nonempty().check((zo)=>{
+       let counter = new Set<string>() ;
+       zo.value.forEach((e)=>{
+            if(counter.has(e.day)){
+                zo.issues.push({
+                    code: "custom",
+                    message : "Dublicate Key",
+                    input : e ,
+                });
+            }
+            else counter.add(e.day) ;
+       })
+    }).optional()
 });
 
 export const BookingData = z.object({
