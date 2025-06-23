@@ -12,7 +12,6 @@ import { asyncHandler } from "../utils/asynchandler.js";
 import { getAllDate } from "../utils/opt.utils.js";
 import { generateParkingSpaceID, getRecordList } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
-import { threadCpuUsage } from "process";
 import mongoose from "mongoose";
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
@@ -109,7 +108,8 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
     let totalSpace = 0 ;
     if (!lotData) throw new ApiError(400, "Can't Find The Lot");
     lotData.spacesList?.forEach(v => {totalSpace+=v}) ;
-            const result = await LotRentRecordModel.find(
+
+    const result = await LotRentRecordModel.find(
           {
             lotId: lotID,
             $or: [

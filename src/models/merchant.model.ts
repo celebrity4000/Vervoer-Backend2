@@ -114,25 +114,27 @@ const parkingLotSchema = new mongoose.Schema({
 }, { 
   timestamps: true,
   toJSON: { virtuals: true },
-  toObject: { virtuals: true }
+  toObject: { virtuals: true },
+  methods : {
+    isOpenNow : function(){
+      const now = new Date();
+      const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
+  
+      const todayHours = this.generalAvailable.find(ga => ga.day === today);
+  
+      if (!todayHours || !todayHours.isOpen) return false;
+      if (todayHours.is24Hours) return true;
+  
+      const currentTime = now.getHours() * 100 + now.getMinutes();
+      const openTime = parseInt(todayHours.openTime?.replace(':', '') || '0');
+      const closeTime = parseInt(todayHours.closeTime?.replace(':', '') || '0');
+  
+      return currentTime >= openTime && currentTime <= closeTime;
+    }
+  }
 })
 
 parkingLotSchema.index({ location: '2dsphere' });
-parkingLotSchema.methods.isOpenNow = function() {
-  const now = new Date();
-  const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
-  
-  const todayHours = this.generalAvailable.find(ga => ga.day === today);
-  
-  if (!todayHours || !todayHours.isOpen) return false;
-  if (todayHours.is24Hours) return true;
-  
-  const currentTime = now.getHours() * 100 + now.getMinutes();
-  const openTime = parseInt(todayHours.openTime.replace(':', ''));
-  const closeTime = parseInt(todayHours.closeTime.replace(':', ''));
-  
-  return currentTime >= openTime && currentTime <= closeTime;
-};
 const lotRentRecordSchema = new mongoose.Schema({
     lotId : {
         type: mongoose.Schema.Types.ObjectId,
