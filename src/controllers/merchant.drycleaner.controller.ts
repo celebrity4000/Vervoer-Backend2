@@ -4,10 +4,12 @@ import z from "zod";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { DryCleaner } from "../models/merchant.model.js";
+import uploadToCloudinary from "../utils/cloudinary.js";
 
 export const registerDryCleaner = asyncHandler(
   async (req: Request, res: Response) => {
     try {
+      // Validate incoming data
       const rData = z
         .object({
           shopname: z.string(),
@@ -16,8 +18,6 @@ export const registerDryCleaner = asyncHandler(
           about: z.string().optional(),
           contactPerson: z.string(),
           phoneNumber: z.string(),
-          contactPersonImg: z.string().optional(),
-          shopimage: z.array(z.string()).optional(),
           hoursOfOperation: z.array(
             z.object({
               day: z.string(),
@@ -35,22 +35,42 @@ export const registerDryCleaner = asyncHandler(
               price: z.number().optional(),
             })
           ),
-          orders: z
-            .array(
-              z.object({
-                serviceName: z.string(),
-                quantity: z.number(),
-                price: z.number(),
-                status: z.enum(["active", "completed"]),
-              })
-            )
-            .optional(),
         })
         .parse(req.body);
 
-      const newDryCleaner = await DryCleaner.create(rData);
+      // Upload contactPersonImg if provided
+      let contactPersonImgUrl: string | undefined;
+      if (req.files && "contactPersonImg" in req.files) {
+        const file = (req.files as any).contactPersonImg[0];
+        const result = await uploadToCloudinary(file.buffer);
+        contactPersonImgUrl = result.secure_url;
+      }
 
-      res.status(201).json(new ApiResponse(201, { dryCleaner: newDryCleaner }));
+      // Upload shop images if any
+      const shopImagesUrls: string[] = [];
+      if (req.files && "shopimage" in req.files) {
+        const files = (req.files as any).shopimage;
+        for (const file of files) {
+          const result = await uploadToCloudinary(file.buffer);
+          shopImagesUrls.push(result.secure_url);
+        }
+      }
+
+      // Create new DryCleaner document with empty orders
+      const newDryCleaner = await DryCleaner.create({
+        ...rData,
+        contactPersonImg: contactPersonImgUrl,
+        shopimage: shopImagesUrls,
+        orders: [], // always empty initially
+      });
+
+      res.status(201).json(
+        new ApiResponse(
+          201,
+          { dryCleaner: newDryCleaner },
+          "Dry Cleaner registered successfully."
+        )
+      );
     } catch (err) {
       if (err instanceof z.ZodError) {
         throw new ApiError(400, "DATA VALIDATION ERROR", err.issues);
