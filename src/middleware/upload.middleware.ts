@@ -1,29 +1,30 @@
-import multer from "multer";
+import multer, { FileFilterCallback } from "multer";
+import { Request } from "express";
 
+// Storage in memory
 const storage = multer.memoryStorage();
 
-export const propertyUpload = multer({
+// File filter for images only
+const imageFileFilter = (
+  req: Request,
+  file: Express.Multer.File,
+  cb: FileFilterCallback
+) => {
+  if (!file.mimetype.startsWith("image/")) {
+    return cb(new Error("Only image files are allowed") as unknown as null, false);
+  }
+  cb(null, true);
+};
+
+// Multer instance for images
+export const imageUpload = multer({
   storage,
-  fileFilter: (req, file, cb) => {
-    if (
-      file.fieldname === "Lease_document" &&
-      !file.mimetype.startsWith("image/")
-    ) {
-      return cb(
-        new Error("Lease_document must be an image") as unknown as null,
-        false
-      );
-    }
-    if (file.fieldname === "pdf" && file.mimetype !== "application/pdf") {
-      return cb(new Error("pdf must be a PDF file") as unknown as null, false);
-    }
-    cb(null, true);
-  },
-  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB per image
 });
 
-// Update fields: multiple images in Lease_document
-export const propertyUploadFields = propertyUpload.fields([
-  { name: "Lease_document", maxCount: 5 }, // 👈 now accepts up to 5 images
-  { name: "pdf", maxCount: 1 },
+// For multiple images under one or multiple field names:
+export const imageUploadFields = imageUpload.fields([
+  { name: "shopImages", maxCount: 10 },
+  { name: "profilePic", maxCount: 1 },
 ]);
