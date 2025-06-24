@@ -4,10 +4,12 @@ import {z} from "zod/v4"
 export const ParkingData = z.object({
     parkingName: z.string().optional(),
     address: z.string().optional(),
-    price: z.number().optional(),
+    price: z.coerce.number().optional(),
     about: z.string().optional(),
-    spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.number()).optional(),
-    generalAvailabel: z.array(z.object({
+    images : z.array(z.url().optional()),
+    contactNumber : z.string().nonempty(),
+    spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number()).optional(),
+    generalAvailable: z.array(z.object({
         day : z.enum(["SUN", "MON", "THU", "WED", "THR", "FRI", "SAT"]),
         closingTime : z.iso.time(),
         openingTime : z.iso.time(),
@@ -24,14 +26,14 @@ export const ParkingData = z.object({
             else counter.add(e.day) ;
        })
     }).optional(),
-    is24x7 : z.boolean().default(false) ,
+    is24x7 : z.coerce.boolean().default(false) ,
 });
 
 export const BookingData = z.object({
     rentFrom : z.iso.date() ,
     rentTo : z.iso.date() ,
     lotId: z.string(),
-    rentedSlot: z.object({zone : z.string().regex(/[A-Z]{1,3}/) ,slot : z.number().lt(1000).positive() }) 
+    rentedSlot: z.object({zone : z.string().regex(/[A-Z]{1,3}/) ,slot : z.coerce.number().lt(1000).positive() }) 
 
 })
 export type BookingData = z.infer<typeof BookingData> 

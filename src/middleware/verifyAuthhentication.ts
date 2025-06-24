@@ -24,19 +24,19 @@ export async function verifyAuthentication(req: Request){
                 if(!fUser){
                     throw new ApiError(401, "UNKNOWN_USER") ;
                 }
-                return {user : fUser, userType : "user"};
+                return {user : fUser, userType : decode.userType};
             case "driver" : 
                 const dUser = await Driver.findById(decode.userId) ;
                 if(!dUser){
                     throw new ApiError(401, "UNKNOWN_USER") ;
                 }
-                return {user : dUser , userType : "driver"} ;
+                return {user : dUser , userType : decode.userType} ;
             case "merchant" :
                 const mUser = await Merchant.findById(decode.userId) ;
                 if(!mUser){
                     throw new ApiError(401, "UNKNOWN_USER") ;
                 }
-                return {user : mUser , userType : "merchant"} ;
+                return {user : mUser , userType : decode.userType} ;
             default:
                 throw new ApiError(401 , "UNKNOWN_USERTYPE");
                 break;

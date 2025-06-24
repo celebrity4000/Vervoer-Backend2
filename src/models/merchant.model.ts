@@ -56,7 +56,6 @@ const parkingLotSchema = new mongoose.Schema({
     },
     email : {
       type : String ,
-      required : true
     },
     totalSlot : {
       type : Number ,

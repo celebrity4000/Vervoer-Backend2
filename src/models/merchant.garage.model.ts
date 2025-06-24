@@ -29,7 +29,8 @@ const garageSchema = new mongoose.Schema({
       },
       coordinates: {
         type: [Number], // [longitude, latitude]
-        required: true
+        required : true,
+        default: [0,0]
       }
     },
     contactNumber: {
@@ -38,7 +39,6 @@ const garageSchema = new mongoose.Schema({
     },
     email: {
       type: String,
-      required: true,
       trim: true,
       lowercase: true
     },

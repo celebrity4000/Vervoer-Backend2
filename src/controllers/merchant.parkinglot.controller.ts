@@ -18,8 +18,10 @@ export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
     try {
+      console.log("REQBODY: ",req.body)
       const rData = ParkingData.parse(req.body);
       const verifiedAuth = await verifyAuthentication(req) ;
+      console.log(verifiedAuth)
       let owner = null ;
       if(verifiedAuth?.userType !== "merchant") {
         throw new ApiError(400, "INVALID_USER") ;
@@ -48,20 +50,16 @@ export const registerParkingLot = asyncHandler(
           imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
         }
       }
+      rData.images = imageURL;
       const newParkingLot = await ParkingLotModel.create({
         owner: owner?._id,
-        parkingName: rData.parkingName,
-        about: rData.about,
-        price: rData.price,
-        address: rData.address,
-        spacesList: rData.spacesList,
-        generalAvailable : rData.generalAvailabel ,
-        images: imageURL
+        ...rData
       });
       await newParkingLot.save();
       res.status(201).json(new ApiResponse(201, { parkingLot: newParkingLot }));
     } catch (err) {
       if (err instanceof z.ZodError) {
+        console.log("Errors ",err.issues) ;
         throw new ApiError(400, "DATA VALIDATION", err.issues);
       }
       throw err;
@@ -90,6 +88,16 @@ export const editParkingLot = asyncHandler(async (req: Request, res: Response) =
     }
 
     // Update the parking lot with new data
+    let imageURL: string[] = [] ;
+      if(req.files){
+        if(Array.isArray(req.files)){
+          imageURL = await Promise.all(req.files.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url)) ;
+        }
+        else {
+          imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
+        }
+      }
+    if(imageURL.length > 0) updateData.images = imageURL ;
     const updatedParkingLot = await ParkingLotModel.findByIdAndUpdate(
       parkingLotId,
       { $set: updateData },
