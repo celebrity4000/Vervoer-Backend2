@@ -87,7 +87,6 @@ export const registerUser = async (
         otpExpiry,
       });
     }
-    console.log(`Generated OTP is ${otp} for user ${newUser._id}`)
 
     await sendEmail(email, "Your Registration OTP", `Your OTP is: ${otp}`);
 

@@ -5,11 +5,14 @@ import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { DryCleaner } from "../models/merchant.model.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
+import { jwtEncode } from "../utils/jwt.js";
+import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
+import { IMerchant } from "../models/merchant.model.js";
 
 const dryCleanerSchema = z.object({
   shopname: z.string(),
   address: z.string(),
-  rating: z.coerce.number().optional(),  
+  rating: z.coerce.number().optional(),
   about: z.string().optional(),
   contactPerson: z.string(),
   phoneNumber: z.string(),
@@ -32,91 +35,112 @@ const dryCleanerSchema = z.object({
   ),
 });
 
-
 export const registerDryCleaner = asyncHandler(
   async (req: Request, res: Response) => {
-    try {
-     
-      if (typeof req.body.hoursOfOperation === "string") {
-        req.body.hoursOfOperation = JSON.parse(req.body.hoursOfOperation);
-      }
-      if (typeof req.body.services === "string") {
-        req.body.services = JSON.parse(req.body.services);
-      }
+    const { authUser } = req as any;
 
-      
-      const rData = dryCleanerSchema.parse(req.body);
-
-
-      let contactPersonImgUrl: string | undefined;
-      if (req.files && "contactPersonImg" in req.files) {
-        const file = (req.files as any).contactPersonImg[0];
-        const result = await uploadToCloudinary(file.buffer);
-        contactPersonImgUrl = result.secure_url;
-      }
-
-      const shopImagesUrls: string[] = [];
-      if (req.files && "shopimage" in req.files) {
-        const files = (req.files as any).shopimage;
-        for (const file of files) {
-          const result = await uploadToCloudinary(file.buffer);
-          shopImagesUrls.push(result.secure_url);
-        }
-      }
-
-      const newDryCleaner = await DryCleaner.create({
-        ...rData,
-        contactPersonImg: contactPersonImgUrl,
-        shopimage: shopImagesUrls,
-        orders: [],
-      });
-
-      res.status(201).json(
-        new ApiResponse(
-          201,
-          { dryCleaner: newDryCleaner },
-          "Dry Cleaner registered successfully."
-        )
-      );
-    } catch (err) {
-      if (err instanceof z.ZodError) {
-        throw new ApiError(400, "DATA VALIDATION ERROR", err.issues);
-      }
-      throw err;
+    if (authUser.userType !== "merchant") {
+      throw new ApiError(403, "Unauthorized access");
     }
+
+    if (typeof req.body.hoursOfOperation === "string") {
+      req.body.hoursOfOperation = JSON.parse(req.body.hoursOfOperation);
+    }
+    if (typeof req.body.services === "string") {
+      req.body.services = JSON.parse(req.body.services);
+    }
+
+    const rData = dryCleanerSchema.parse(req.body);
+
+    let contactPersonImgUrl: string | undefined;
+    if (req.files && "contactPersonImg" in req.files) {
+      const file = (req.files as any).contactPersonImg[0];
+      const result = await uploadToCloudinary(file.buffer);
+      contactPersonImgUrl = result.secure_url;
+    }
+
+    const shopImagesUrls: string[] = [];
+    if (req.files && "shopimage" in req.files) {
+      const files = (req.files as any).shopimage;
+      for (const file of files) {
+        const result = await uploadToCloudinary(file.buffer);
+        shopImagesUrls.push(result.secure_url);
+      }
+    }
+
+    const newDryCleaner = await DryCleaner.create({
+      ...rData,
+      contactPersonImg: contactPersonImgUrl,
+      shopimage: shopImagesUrls,
+      owner: authUser.user._id,
+    });
+
+    const merchantUser = authUser.user as IMerchant;
+    merchantUser.haveDryCleaner = true;
+    await merchantUser.save();
+
+    const token = jwtEncode({
+      userId: newDryCleaner._id,
+      userType: "merchant",
+    });
+
+    res.status(201).json(
+      new ApiResponse(
+        201,
+        { dryCleaner: newDryCleaner, token },
+        "Dry Cleaner registered successfully."
+      )
+    );
   }
 );
 
 
 
+
+
+
+
+// 685a7c18f4da69fac27146bd
+
 // contactperon edit
-export const updateDryCleanerContactDetails = asyncHandler(async (req: Request, res: Response) => {
-  const { dryCleanerId } = req.params;
+export const updateDryCleanerContactDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authUser = await verifyAuthentication(req);
 
-  
-  const dryCleaner = await DryCleaner.findById(dryCleanerId);
-  if (!dryCleaner) {
-    throw new ApiError(404, "Dry cleaner not found");
+    if (!authUser || authUser.userType !== "merchant") {
+      throw new ApiError(403, "Unauthorized access");
+    }
+
+    const dryCleaner = await DryCleaner.findOne({ owner: authUser.user._id });
+
+    if (!dryCleaner) {
+      throw new ApiError(404, "Dry cleaner not found");
+    }
+
+    if (req.files && "contactPersonImg" in req.files) {
+      const file = (req.files as any).contactPersonImg[0];
+      const result = await uploadToCloudinary(file.buffer);
+      dryCleaner.contactPersonImg = result.secure_url;
+    }
+
+    if (req.body.contactPerson) {
+      dryCleaner.contactPerson = req.body.contactPerson;
+    }
+
+    if (req.body.phoneNumber) {
+      dryCleaner.phoneNumber = req.body.phoneNumber;
+    }
+
+    await dryCleaner.save();
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { dryCleaner },
+          "Contact details updated successfully."
+        )
+      );
   }
-
-  
-  if (req.files && "contactPersonImg" in req.files) {
-    const file = (req.files as any).contactPersonImg[0];
-    const result = await uploadToCloudinary(file.buffer);
-    dryCleaner.contactPersonImg = result.secure_url;
-  }
-  
-  if (req.body.contactPerson) {
-    dryCleaner.contactPerson = req.body.contactPerson;
-  }
-
-  if (req.body.phoneNumber) {
-    dryCleaner.phoneNumber = req.body.phoneNumber;
-  }
-
-  await dryCleaner.save();
-
-  res.status(200).json(
-    new ApiResponse(200, { dryCleaner }, "Contact details updated successfully.")
-  );
-});
+);
