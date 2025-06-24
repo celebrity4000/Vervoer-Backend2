@@ -134,7 +134,7 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
             ).then(e=>e.map(e=>e.secure_url));
       }
     if(imageURL.length > 0){
-        updateData.images = imageURL
+        updateData.images = [...garage.images, ...imageURL]
     }
     const updatedGarage = await Garage.findByIdAndUpdate(
       garageId,

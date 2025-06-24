@@ -4,9 +4,9 @@ import {
   Merchant,
   ParkingLotModel,
 } from "../models/merchant.model.js";
-import { BookingData, ParkingData } from "../zodTypes/parkingLotData.js";
+import { BookingData, ParkingData } from "../zodTypes/merchantData.js";
 import { ApiError } from "../utils/apierror.js";
-import z, { promise } from "zod/v4";
+import z from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { getAllDate } from "../utils/opt.utils.js";
@@ -97,7 +97,7 @@ export const editParkingLot = asyncHandler(async (req: Request, res: Response) =
           imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
         }
       }
-    if(imageURL.length > 0) updateData.images = imageURL ;
+    if(imageURL.length > 0) updateData.images = [...parkingLot.images, ...imageURL] ;
     const updatedParkingLot = await ParkingLotModel.findByIdAndUpdate(
       parkingLotId,
       { $set: updateData },
