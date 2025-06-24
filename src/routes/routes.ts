@@ -16,9 +16,10 @@ router.post("/verify-otp", asyncHandler(verifyOtp));
 // Dry cleaner registration route with image upload middleware
 router.post(
   "/dry-cleaner",
-  imageUploadFields,              
+  imageUploadFields, 
   registerDryCleaner
 );
+
 
 // Nested merchant routes
 

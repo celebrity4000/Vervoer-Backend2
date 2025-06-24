@@ -25,6 +25,8 @@ export const imageUpload = multer({
 
 // For multiple images under one or multiple field names:
 export const imageUploadFields = imageUpload.fields([
-  { name: "shopImages", maxCount: 10 },
-  { name: "profilePic", maxCount: 1 },
+  { name: "shopimage", maxCount: 10 },
+  { name: "contactPersonImg", maxCount: 1 },
 ]);
+
+;
