@@ -31,7 +31,7 @@ const MerchantSchema = new Schema(
       type: Boolean,
       default: false,
     },
-    haveResidenceParking: {
+    haveResidence: {
       type: Boolean,
       default: false,
     },

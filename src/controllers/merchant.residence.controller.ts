@@ -17,17 +17,10 @@ export const addResidence = asyncHandler(async (req: Request, res: Response) => 
     }
 
     const owner = verifiedAuth.user;
-    // Validate request body against schema
     const validatedData = residenceSchema.parse({
       ...req.body,
-      // Ensure gpsLocation has proper structure
-      gpsLocation: {
-        type: "Point",
-        coordinates: req.body.gpsLocation?.coordinates || [0, 0]
-      }
     }) as ResidenceData;
 
-    // Handle file uploads
     let imageURLs: string[] = [];
     if (req.files) {
       const files = Array.isArray(req.files) ? req.files : req.files.images;
@@ -40,18 +33,13 @@ export const addResidence = asyncHandler(async (req: Request, res: Response) => 
     const newResidence = await ResidenceModel.create({
       ...validatedData,
       images: imageURLs,
-      owner,
-      // Ensure proper GeoJSON format for MongoDB
-      gpsLocation: {
-        type: "Point",
-        coordinates: validatedData.gpsLocation.coordinates
-      }
+      owner : owner._id ,
     });
 
     // Update merchant's residences array
     await Merchant.findByIdAndUpdate(
-      owner,
-      { $addToSet: { residences: newResidence._id } },
+      owner._id,
+      { $set: {haveResidence: true} },
       { new: true }
     );
 
@@ -75,10 +63,8 @@ export const updateResidence = asyncHandler(async (req: Request, res: Response) 
 
     const owner = verifiedAuth.user;
     
-    // Validate update data against schema (all fields optional)
     const updates = updateResidenceSchema.parse(req.body)
 
-    // Find the residence and verify ownership
     const residence = await ResidenceModel.findOne({
       _id: residenceId,
       owner: owner
@@ -95,13 +81,8 @@ export const updateResidence = asyncHandler(async (req: Request, res: Response) 
         files.map((file: any) => uploadToCloudinary(file.buffer))
       ).then((results) => results.map((result) => result.secure_url));
       
-      // Combine new images with existing ones
       updates.images = [...residence.images, ...newImageURLs];
     }
-
-    // gpsLocation is already validated and formatted by the schema
-
-    // Update the residence
     const updatedResidence = await ResidenceModel.findByIdAndUpdate(
       residenceId,
       { $set: updates },
