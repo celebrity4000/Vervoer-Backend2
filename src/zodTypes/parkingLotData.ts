@@ -23,7 +23,8 @@ export const ParkingData = z.object({
             }
             else counter.add(e.day) ;
        })
-    }).optional()
+    }).optional(),
+    is24x7 : z.boolean().default(false) ,
 });
 
 export const BookingData = z.object({

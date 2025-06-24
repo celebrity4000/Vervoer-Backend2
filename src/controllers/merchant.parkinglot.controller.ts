@@ -6,13 +6,14 @@ import {
 } from "../models/merchant.model.js";
 import { BookingData, ParkingData } from "../zodTypes/parkingLotData.js";
 import { ApiError } from "../utils/apierror.js";
-import z from "zod/v4";
+import z, { promise } from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { getAllDate } from "../utils/opt.utils.js";
 import { generateParkingSpaceID, getRecordList } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
+import uploadToCloudinary from "../utils/cloudinary.js";
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
@@ -38,6 +39,15 @@ export const registerParkingLot = asyncHandler(
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
+      let imageURL: string[] = [] ;
+      if(req.files){
+        if(Array.isArray(req.files)){
+          imageURL = await Promise.all(req.files.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url)) ;
+        }
+        else {
+          imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
+        }
+      }
       const newParkingLot = await ParkingLotModel.create({
         owner: owner?._id,
         parkingName: rData.parkingName,
@@ -46,8 +56,8 @@ export const registerParkingLot = asyncHandler(
         address: rData.address,
         spacesList: rData.spacesList,
         generalAvailable : rData.generalAvailabel ,
+        images: imageURL
       });
-
       await newParkingLot.save();
       res.status(201).json(new ApiResponse(201, { parkingLot: newParkingLot }));
     } catch (err) {
