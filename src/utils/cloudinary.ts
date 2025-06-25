@@ -17,7 +17,7 @@ console.log({
 })
 export const deleteFromCloudinary = async function (public_id:string) {
   return new Promise<void>((res , rej) =>
-  cloudinary.uploader.destroy(public_id,{resource_type: "image"},(err,cr)=>{
+  cloudinary.uploader.destroy(public_id,{resource_type: "image"},(err)=>{
     if(err)rej(err) ;
     res();
   }))

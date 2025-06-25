@@ -1,7 +1,6 @@
 import { Request, Response } from "express";
 import {
   LotRentRecordModel,
-  Merchant,
   ParkingLotModel,
 } from "../models/merchant.model.js";
 import { BookingData, ParkingData } from "../zodTypes/merchantData.js";
@@ -9,8 +8,7 @@ import { ApiError } from "../utils/apierror.js";
 import z from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
-import { getAllDate } from "../utils/opt.utils.js";
-import { generateParkingSpaceID, getRecordList } from "../utils/lotProcessData.js";
+import { generateParkingSpaceID  } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
 import uploadToCloudinary from "../utils/cloudinary.js";
@@ -257,6 +255,36 @@ export const bookASlot = asyncHandler(
     } 
   }
 });
-
-// dry cleaner controller
-
+export const getParkingLotbyId = asyncHandler(async (req,res)=>{
+  const lotId = req.params.id ;
+  const lotdetalis = await ParkingLotModel.findById(lotId);
+  if(lotdetalis){
+    res.status(200).json(new ApiResponse(200,lotdetalis));
+  }
+  else throw new ApiError(400,"NOT_FOUND");
+})
+export const deleteParking = asyncHandler(
+  async (req,res)=>{
+    try {
+      const lotId = z.string().parse(req.query.id) ;
+      const authUser = await verifyAuthentication(req) ;
+      if(!authUser?.user || authUser.userType!== "merchant" ) throw new ApiError(403,"UNKNOWN_USER") ;
+      const del = await ParkingLotModel.findOneAndDelete({
+        _id : lotId,
+        owner : authUser?.user
+      })
+      if(del){
+        res.status(200).json(new ApiResponse(200,del,"DELETE SUCCESSFUL"))
+      }else {
+        if(await ParkingLotModel.findById(lotId)) 
+          throw new ApiError(403,"ACCESS_DENIED");
+        else throw new ApiError(404,"NOT_FOUND");
+      }
+    } catch (error) {
+      if(error instanceof z.ZodError){
+        throw new ApiError(400,"INVALID_ID");
+      }
+      else throw error ;
+    }
+  }
+)

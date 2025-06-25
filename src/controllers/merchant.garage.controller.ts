@@ -158,7 +158,7 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
 /**
  * Get available slots for a garage
  */
-export const getAvailableSlots = asyncHandler(async (req: Request, res: Response) => {
+export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Response) => {
   try {
     const startDate = z.iso.date().parse(req.query.startDate);
     const endDate = z.iso.date().parse(req.query.endDate);
@@ -307,3 +307,24 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
     throw err;
   }
 });
+
+export const deleteGarage = asyncHandler(async (req,res)=>{
+  try{
+  const garageId = z.string().parse(req.query.id);
+  const authUser = await verifyAuthentication(req);
+  if(!authUser?.user || authUser.userType !== "merchant") throw new ApiError(403,"UNAUTHORIZED_ACCESS")
+  const del = Garage.findOneAndDelete({
+    _id: garageId,
+    owner: authUser?.user
+  })
+  if(!del){
+    if(await Garage.findById(garageId))throw new ApiError(403, "ACCESS_DENIED");
+    throw new ApiError(404,"NOT_FOUND");
+  }else {
+    res.status(200).json(new ApiResponse(200,del)) ;
+  }
+  }catch(error){
+    if(error instanceof z.ZodError) throw new ApiError(400,"INVALID_DATA") ;
+    throw error ;
+  }
+})

@@ -9,7 +9,6 @@ import uploadToCloudinary from "../utils/cloudinary.js";
 import { residenceSchema, updateResidenceSchema, type ResidenceData } from "../zodTypes/merchantData.js";
 
 export const addResidence = asyncHandler(async (req: Request, res: Response) => {
-  try {
     const verifiedAuth = await verifyAuthentication(req);
     
     if (verifiedAuth?.userType !== "merchant") {
@@ -25,7 +24,7 @@ export const addResidence = asyncHandler(async (req: Request, res: Response) => 
     if (req.files) {
       const files = Array.isArray(req.files) ? req.files : req.files.images;
       imageURLs = await Promise.all(
-        files.map((file: any) => uploadToCloudinary(file.buffer))
+        files.map((file) => uploadToCloudinary(file.buffer))
       ).then((results) => results.map((result) => result.secure_url));
     }
 
@@ -47,13 +46,9 @@ export const addResidence = asyncHandler(async (req: Request, res: Response) => 
       .status(201)
       .json(new ApiResponse(201, newResidence, "Residence added successfully"));
       return ;
-  } catch (error: any) {
-    throw new ApiError(400, error?.message || "Error adding residence");
-  }
 });
 
 export const updateResidence = asyncHandler(async (req: Request, res: Response) => {
-  try {
     const { residenceId } = req.params;
     const verifiedAuth = await verifyAuthentication(req);
     
@@ -78,7 +73,7 @@ export const updateResidence = asyncHandler(async (req: Request, res: Response) 
     if (req.files) {
       const files = Array.isArray(req.files) ? req.files : req.files.images;
       const newImageURLs = await Promise.all(
-        files.map((file: any) => uploadToCloudinary(file.buffer))
+        files.map((file) => uploadToCloudinary(file.buffer))
       ).then((results) => results.map((result) => result.secure_url));
       
       updates.images = [...residence.images, ...newImageURLs];
@@ -92,13 +87,9 @@ export const updateResidence = asyncHandler(async (req: Request, res: Response) 
     res
       .status(200)
       .json(new ApiResponse(200, updatedResidence, "Residence updated successfully"));
-  } catch (error: any) {
-    throw new ApiError(400, error?.message || "Error updating residence");
-  }
 });
 
 export const getResidenceById = asyncHandler(async (req: Request, res: Response) => {
-  try {
     const { residenceId } = req.params;
     
     const residence = await ResidenceModel.findById(residenceId)
@@ -112,13 +103,9 @@ export const getResidenceById = asyncHandler(async (req: Request, res: Response)
     res
       .status(200)
       .json(new ApiResponse(200, residence, "Residence retrieved successfully"));
-  } catch (error: any) {
-    throw new ApiError(400, error?.message || "Error retrieving residence");
-  }
 });
 
 export const deleteResidence = asyncHandler(async (req: Request, res: Response) => {
-  try {
     const { residenceId } = req.params;
     const verifiedAuth = await verifyAuthentication(req);
     
@@ -135,7 +122,8 @@ export const deleteResidence = asyncHandler(async (req: Request, res: Response) 
     });
 
     if (!deletedResidence) {
-      throw new ApiError(404, "Residence not found or access denied");
+      
+      throw new ApiError(404, "NOT_FOUND:Residence not found or access denied");
     }
 
     // Remove from merchant's residences array
@@ -148,13 +136,9 @@ export const deleteResidence = asyncHandler(async (req: Request, res: Response) 
     res
       .status(200)
       .json(new ApiResponse(200, null, "Residence deleted successfully"));
-  } catch (error: any) {
-    throw new ApiError(400, error?.message || "Error deleting residence");
-  }
 });
 
 export const getMerchantResidences = asyncHandler(async (req: Request, res: Response) => {
-  try {
     const verifiedAuth = await verifyAuthentication(req);
     
     if (verifiedAuth?.userType !== "merchant") {
@@ -167,7 +151,4 @@ export const getMerchantResidences = asyncHandler(async (req: Request, res: Resp
     res
       .status(200)
       .json(new ApiResponse(200, residences, "Residences retrieved successfully"));
-  } catch (error: any) {
-    throw new ApiError(400, error?.message || "Error retrieving residences");
-  }
 });

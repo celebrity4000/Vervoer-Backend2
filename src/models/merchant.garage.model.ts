@@ -102,7 +102,7 @@ const garageSchema = new mongoose.Schema({
         return currentTime >= openTime && currentTime <= closeTime;
       },
       getAllSlots : function(){
-        let res = new Set<string>()
+        const res = new Set<string>()
         if(this.availableSlots){
           this.availableSlots.forEach((value:number ,key:string)=>{
             for(let i = 1 ; i <= value ; i++){

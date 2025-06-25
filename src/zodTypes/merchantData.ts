@@ -20,7 +20,7 @@ export const ParkingData = z.object({
     gpsLocation: gpsLocationSchema,
     spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number()).optional(),
     generalAvailable: z.array(availableDaySchema).nonempty().check((zo)=>{
-       let counter = new Set<string>() ;
+       const counter = new Set<string>() ;
        zo.value.forEach((e)=>{
             if(counter.has(e.day)){
                 zo.issues.push({
@@ -55,7 +55,7 @@ export const residenceSchema = z.object({
   price: z.coerce.number().positive(),
   about: z.string().min(20),
   generalAvailable: z.array(availableDaySchema).check((zo)=>{
-    let counter = new Set<string>() ;
+    const counter = new Set<string>() ;
     zo.value.forEach((e)=>{
          if(counter.has(e.day)){
              zo.issues.push({

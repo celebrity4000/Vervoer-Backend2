@@ -1,8 +1,8 @@
-import { NextFunction, Request, Response } from "express";
+import { Request} from "express";
 import { jwtDecode } from "../utils/jwt.js";
 import z from "zod/v4"
 import { ApiError } from "../utils/apierror.js";
-import { IUser, User } from "../models/normalUser.model.js";
+import { User } from "../models/normalUser.model.js";
 import { Driver } from "../models/driver.model.js";
 import { Merchant } from "../models/merchant.model.js";
 import jwt from "jsonwebtoken";
@@ -18,28 +18,26 @@ export async function verifyAuthentication(req: Request){
             userType : z.enum(["user", "merchant" , "driver"])
         }).parse(jwtDecode(token));
         
-        switch (decode.userType) {
-            case "user":
-                const fUser = await User.findById(decode.userId) ;
-                if(!fUser){
-                    throw new ApiError(401, "UNKNOWN_USER") ;
-                }
-                return {user : fUser, userType : decode.userType};
-            case "driver" : 
-                const dUser = await Driver.findById(decode.userId) ;
-                if(!dUser){
-                    throw new ApiError(401, "UNKNOWN_USER") ;
-                }
-                return {user : dUser , userType : decode.userType} ;
-            case "merchant" :
-                const mUser = await Merchant.findById(decode.userId) ;
-                if(!mUser){
-                    throw new ApiError(401, "UNKNOWN_USER") ;
-                }
-                return {user : mUser , userType : decode.userType} ;
-            default:
-                throw new ApiError(401 , "UNKNOWN_USERTYPE");
-                break;
+        if (decode.userType === "user") {
+          const fUser = await User.findById(decode.userId);
+          if (!fUser) {
+            throw new ApiError(401, "UNKNOWN_USER");
+          }
+          return { user: fUser, userType: decode.userType };
+        } else if (decode.userType === "driver") {
+          const dUser = await Driver.findById(decode.userId);
+          if (!dUser) {
+            throw new ApiError(401, "UNKNOWN_USER");
+          }
+          return { user: dUser, userType: decode.userType };
+        } else if (decode.userType === "merchant") {
+          const mUser = await Merchant.findById(decode.userId);
+          if (!mUser) {
+            throw new ApiError(401, "UNKNOWN_USER");
+          }
+          return { user: mUser, userType: decode.userType };
+        } else {
+          throw new ApiError(401, "UNKNOWN_USERTYPE");
         }
     } catch (error) {
         if(error instanceof jwt.TokenExpiredError){

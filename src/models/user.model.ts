@@ -1,5 +1,3 @@
-import { Schema } from "mongoose";
-
 export const UserBaseSchemaFields = {
   phoneNumber: { type: String, required: true,},
   password: { type: String, required: true },
