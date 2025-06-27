@@ -163,6 +163,14 @@ const lotRentRecordSchema = new mongoose.Schema({
 export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
 export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
 
+const addressSchema = new mongoose.Schema({
+  street:   { type: String, required: true },
+  city:     { type: String, required: true },
+  state:    { type: String, required: true },
+  zipCode:  { type: String, required: true },
+  country:  { type: String, required: true },
+}, { _id: false });
+
 const dryCleanerSchema = new mongoose.Schema({
   owner: {
     type: mongoose.Types.ObjectId,
@@ -170,7 +178,9 @@ const dryCleanerSchema = new mongoose.Schema({
     required: true,
   },
   shopname: { type: String, required: true },
-  address: { type: String, required: true },
+
+  address: { type: addressSchema, required: true },  
+
   rating: { type: Number, default: 0 },
   about: { type: String },
   contactPerson: { type: String, required: true },
@@ -211,3 +221,7 @@ const dryCleanerSchema = new mongoose.Schema({
 
 
 export const DryCleaner = mongoose.model("DryCleaner", dryCleanerSchema );
+
+
+// dry cleaner driver
+

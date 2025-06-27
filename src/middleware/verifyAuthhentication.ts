@@ -19,7 +19,6 @@ export async function verifyAuthentication(req: Request) {
       ? authHeader.slice(7)
       : authHeader;
     const rawDecode = jwtDecode(token);
-    console.log("Decoded Token:", rawDecode);
 
     // Decode & Validate structure
     const decode = z

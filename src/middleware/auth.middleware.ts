@@ -1,13 +1,13 @@
-import { NextFunction, Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import { verifyAuthentication } from "./verifyAuthhentication.js";
-import { ApiError } from "../utils/apierror.js";
 
 export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const authUser = await verifyAuthentication(req);
-    (req as any).authUser = authUser;
+    // @ts-ignore: extend request object
+    req.authUser = authUser;
     next();
-  } catch (err) {
-    next(err);
+  } catch (error) {
+    next(error);
   }
 };
