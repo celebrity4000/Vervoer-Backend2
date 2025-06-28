@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { Garage, GarageBooking } from "../models/merchant.garage.model.js";
+import { Garage, GarageBooking, IGarage } from "../models/merchant.garage.model.js";
 import { ApiError } from "../utils/apierror.js";
 import z from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
@@ -14,9 +14,10 @@ const GarageData = z.object({
   garageName: z.string().min(1, "Garage name is required"),
   about: z.string().min(1, "About is required"),
   address: z.string().min(1, "Address is required"),
+  price: z.coerce.number(),
   location: z.object({
     type: z.literal("Point"),
-    coordinates: z.tuple([z.coerce.number(), z.coerce.number()])
+    coordinates: z.tuple([z.coerce.number().gte(-180).lte(180), z.coerce.number().gte(-90).lte(90)])
   }).optional(),
   images : z.array(z.url()).optional(),
   contactNumber: z.string().min(9, "Contact number is required"),
@@ -328,3 +329,33 @@ export const deleteGarage = asyncHandler(async (req,res)=>{
     throw error ;
   }
 })
+
+export const getListOfGarage = asyncHandler(async (req, res) => {
+  try {
+    const longitude = z.coerce.number().optional().parse(req.query.longitude);
+    const latitude = z.coerce.number().optional().parse(req.query.latitude);
+    console.log(longitude, latitude);
+    const queries: mongoose.FilterQuery<IGarage> = {};
+    if (longitude && latitude) {
+      queries.location = {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [longitude, latitude],
+          },
+        },
+      };
+    }
+
+    const result = await Garage.find(queries).exec();
+    if (result) {
+      res.status(200).json(new ApiResponse(200, result));
+    } else throw new ApiError(500);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "INVALID_QUERY", error.issues);
+    } else if (error instanceof ApiError) throw error;
+    console.log(error);
+    throw new ApiError(500, "Server Error", error);
+  }
+});

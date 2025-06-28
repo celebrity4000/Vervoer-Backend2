@@ -1,12 +1,14 @@
 import { Request, Response } from "express";
 import { Merchant } from "../models/merchant.model.js";
-import { ResidenceModel } from "../models/merchant.residence.model.js";
+import { IResident, ResidenceModel } from "../models/merchant.residence.model.js";
 import { ApiError } from "../utils/apierror.js";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { residenceSchema, updateResidenceSchema, type ResidenceData } from "../zodTypes/merchantData.js";
+import z from "zod/v4";
+import mongoose from "mongoose";
 
 export const addResidence = asyncHandler(async (req: Request, res: Response) => {
     const verifiedAuth = await verifyAuthentication(req);
@@ -152,3 +154,36 @@ export const getMerchantResidences = asyncHandler(async (req: Request, res: Resp
       .status(200)
       .json(new ApiResponse(200, residences, "Residences retrieved successfully"));
 });
+
+export const getListOfResidence = asyncHandler(async (req, res)=>{
+  try {
+
+  
+  const longitude = z.coerce.number().optional().parse(req.query.longitude) ;
+  const latitude = z.coerce.number().optional().parse(req.query.latitude) ;
+  console.log(longitude , latitude) ;
+  const queries: mongoose.FilterQuery<IResident> = {} ;
+  if(longitude && latitude) {
+    queries.gpsLocation = {
+      $near : {
+      $geometry: {
+        type : "Point",
+        coordinates :[longitude,latitude] ,
+      }
+    }}
+  }
+
+  const result = await ResidenceModel.find(queries).exec() ;
+  if(result){
+    res.status(200).json(new ApiResponse(200,result))
+  }
+  else throw new ApiError(500) ;
+}catch(error){
+  if(error instanceof z.ZodError){
+    throw new ApiError(400,"INVALID_QUERY",error.issues);
+  }
+  else if(error instanceof ApiError) throw error ;
+  console.log(error) ;
+  throw new ApiError(500, "Server Error", error);
+}
+})

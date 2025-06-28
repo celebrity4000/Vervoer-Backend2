@@ -1,9 +1,38 @@
 import mongoose from "mongoose";
 
-const residenceSchema = new mongoose.Schema({
+export interface IResident {
+  owner : mongoose.Types.ObjectId,
+  residenceName :string ,
+  about : string ,
+  address : string,
+  gpsLocation : {type : "Point", coordinates : [number,number]},
+  price: number,
+  contactNumber : string ,
+  email? : string ,
+  generalAvailable : [{
+    day : "SUN" |  "MON" |  "TUE" |  "WED" |  "THU" |  "FRI" |  "SAT",
+    isOpen? : boolean,
+    openTime? : string ,
+    closeTime? : string ,
+    is24Hours : boolean ,
+  }]
+  // totalSlot? : number,
+  images : string[],
+  isVerified : boolean,
+  isActive : boolean,
+  is24x7:boolean,
+  emergencyContact? : {
+    person : string ,
+    number : string ,
+  }
+};
+interface ResidentMethods {
+  isOpenNow : ()=>boolean
+}
+const residenceSchema = new mongoose.Schema<IResident, mongoose.Model<IResident>, ResidentMethods>({
     images : [String],
     owner : {
-        type : mongoose.Types.ObjectId,
+        type : mongoose.Schema.ObjectId,
         ref : "Merchant"
     },
     contactNumber : {
@@ -13,9 +42,9 @@ const residenceSchema = new mongoose.Schema({
     email : {
       type : String ,
     },
-    totalSlot : {
-      type : Number ,
-    },
+    // totalSlot : {
+    //   type : Number ,
+    // },
     residenceName : {
         type : String , 
         required: true
@@ -24,16 +53,16 @@ const residenceSchema = new mongoose.Schema({
         type : String , 
         required: true
     },
-    gpsLocation: {
+    gpsLocation : {
       type : {
         type : String ,
-        enum : "Point",
+        enum : ["Point"],
         default : "Point",
       },
-      coordinate : {
-        type : [Number],
-        required : true ,
-      },
+      coordinates:{
+        type : [Number,Number],
+        required: true
+      }
   },
     price : {
         type: Number,
@@ -62,6 +91,10 @@ const residenceSchema = new mongoose.Schema({
     }],
     is24x7: Boolean ,
     isActive : {type : Boolean , default : true },
+    emergencyContact : {
+      person : String,
+      number : String,
+    }
 }, { 
   timestamps: true,
   toJSON: { virtuals: true },
@@ -84,6 +117,6 @@ const residenceSchema = new mongoose.Schema({
     }
   }
 });
-
+residenceSchema.index({ gpsLocation : '2dsphere' });
 
 export const ResidenceModel = mongoose.model("Residence",residenceSchema) ;

@@ -1,7 +1,7 @@
 import {z} from "zod/v4"
 const gpsLocationSchema = z.object({
     type: z.literal("Point").default("Point"),
-    coordinates: z.tuple([z.coerce.number(), z.coerce.number()])
+    coordinates: z.tuple([z.coerce.number().lte(180).gte(-180), z.coerce.number().lte(90).gte(-90)],"Bad Values for Geo location")
   });
   
 const availableDaySchema = z.object({
@@ -15,7 +15,7 @@ export const ParkingData = z.object({
     address: z.string(),
     price: z.coerce.number(),
     about: z.string(),
-    images : z.array(z.url().optional()),
+    images : z.array(z.url()).optional(),
     contactNumber : z.string().nonempty(),
     gpsLocation: gpsLocationSchema,
     spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number()).optional(),

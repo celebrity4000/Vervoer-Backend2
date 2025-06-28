@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import {
+  IParking,
   LotRentRecordModel,
   ParkingLotModel,
 } from "../models/merchant.model.js";
@@ -17,7 +18,6 @@ export const registerParkingLot = asyncHandler(
     //TODO: verify merchant account
     try {
       console.log("REQBODY: ",req.body)
-      const rData = ParkingData.parse(req.body);
       const verifiedAuth = await verifyAuthentication(req) ;
       console.log(verifiedAuth)
       let owner = null ;
@@ -25,20 +25,10 @@ export const registerParkingLot = asyncHandler(
         throw new ApiError(400, "INVALID_USER") ;
       }
       owner = verifiedAuth.user ;
-      if (
-        !(
-          rData.about &&
-          rData.address &&
-          rData.spacesList &&
-          rData.parkingName &&
-          rData.price 
-        )
-      ) {
-        throw new ApiError(400, "DATA VALIDATION");
-      }
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
+      const rData = ParkingData.parse(req.body);
       let imageURL: string[] = [] ;
       if(req.files){
         if(Array.isArray(req.files)){
@@ -48,7 +38,8 @@ export const registerParkingLot = asyncHandler(
           imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
         }
       }
-      rData.images = imageURL;
+      rData.images = imageURL ;
+      
       const newParkingLot = await ParkingLotModel.create({
         owner: owner?._id,
         ...rData
@@ -288,3 +279,36 @@ export const deleteParking = asyncHandler(
     }
   }
 )
+
+export const getListOfParkingLot = asyncHandler(async (req, res)=>{
+  try {
+
+  
+  const longitude = z.coerce.number().optional().parse(req.query.longitude) ;
+  const latitude = z.coerce.number().optional().parse(req.query.latitude) ;
+  console.log(longitude , latitude) ;
+  const queries: mongoose.FilterQuery<IParking> = {} ;
+  if(longitude && latitude) {
+    queries.gpsLocation = {
+      $near : {
+      $geometry: {
+        type : "Point",
+        coordinates :[longitude,latitude] ,
+      }
+    }}
+  }
+
+  const result = await ParkingLotModel.find(queries).exec() ;
+  if(result){
+    res.status(200).json(new ApiResponse(200,result))
+  }
+  else throw new ApiError(500) ;
+}catch(error){
+  if(error instanceof z.ZodError){
+    throw new ApiError(400,"INVALID_QUERY",error.issues);
+  }
+  else if(error instanceof ApiError) throw error ;
+  console.log(error) ;
+  throw new ApiError(500, "Server Error", error);
+}
+})

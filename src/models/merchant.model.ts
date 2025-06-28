@@ -44,10 +44,36 @@ export const Merchant = mongoose.model<IMerchant>(
   MerchantSchema,
   "merchants"
 );
-const parkingLotSchema = new mongoose.Schema({
+
+export interface IParking {
+  images : [string],
+  owner : mongoose.Types.ObjectId ,
+  contactNumber : string,
+  email? : string ,
+  totalSlot? : number ,
+  parkingName : string ,
+  address : string ,
+  gpsLocation? : {type : "Point", coordinates : [number,number]},
+  price : number ,
+  about : string ,
+  spacesList : Map<string,number>,
+  generalAvailable : [{
+    day : "SUN" |  "MON" |  "TUE" |  "WED" |  "THU" |  "FRI" |  "SAT",
+    isOpen? : boolean,
+    openTime? : string ,
+    closeTime? : string ,
+    is24Hours : boolean ,
+  }],
+  is24x7 : boolean,
+  isActive: boolean,
+}
+interface IParkingMethods {
+  isOpenNow: ()=>boolean ;
+}
+const parkingLotSchema = new mongoose.Schema<IParking,mongoose.Model<IParking> , IParkingMethods>({
     images : [String],
     owner : {
-        type : mongoose.Types.ObjectId,
+        type : mongoose.Schema.ObjectId,
         ref : "Merchant"
     },
     contactNumber : {
@@ -74,7 +100,7 @@ const parkingLotSchema = new mongoose.Schema({
         enum : "Point",
         default : "Point",
       },
-      coordinate : {
+      coordinates : {
         type : [Number],
         required : true ,
       },
@@ -133,7 +159,7 @@ const parkingLotSchema = new mongoose.Schema({
   }
 })
 
-parkingLotSchema.index({ location: '2dsphere' });
+parkingLotSchema.index({ gpsLocation : '2dsphere' });
 const lotRentRecordSchema = new mongoose.Schema({
     lotId : {
         type: mongoose.Schema.Types.ObjectId,

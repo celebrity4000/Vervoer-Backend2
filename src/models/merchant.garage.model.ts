@@ -1,13 +1,44 @@
 import mongoose from "mongoose";
 import { generateParkingSpaceID } from "../utils/lotProcessData.js";
 
-
-const garageSchema = new mongoose.Schema({
+export interface IGarage {
+  owner: mongoose.Types.ObjectId;
+  garageName: string;
+  about: string;
+  address: string;
+  location: { type: "Point"; coordinates: [number, number] };
+  contactNumber: string;
+  price: number,
+  email?: string;
+  workingHours: [
+    {
+      day: "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
+      isOpen?: boolean;
+      openTime?: string;
+      closeTime?: string;
+      is24Hours: boolean;
+    }
+  ];
+  images: string[];
+  isVerified: boolean;
+  isActive: boolean;
+  availableSlots: Map<string, number>;
+  is24x7: boolean;
+  emergencyContact?: {
+    person: string;
+    number: string;
+  };
+}
+interface GarageMethods {
+  isOpenNow: () => boolean;
+}
+const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, GarageMethods>({
     owner: {
-      type: mongoose.Types.ObjectId,
+      type: mongoose.Schema.ObjectId,
       ref: "Merchant",
       required: true
     },
+    price: {type: Number, required:true},
     garageName: {
       type: String,
       required: true,
