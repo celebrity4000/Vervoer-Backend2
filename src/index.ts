@@ -7,7 +7,7 @@ import merchantRouter from "./routes/merchant.routes.js";
 dotenv.config({
   path: "./.env",
 });
-
+console.log(process.env)
 const app: Application = express();
 const PORT: number = parseInt(process.env.PORT || "5000", 10);
 
