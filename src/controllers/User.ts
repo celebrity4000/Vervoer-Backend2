@@ -284,7 +284,8 @@ export const loginUser = asyncHandler(
     res.status(200).json({
       success: true,
       message: "Login successful",
-      user : {...existingUser, userType},
+      user : existingUser,
+      userType ,
       token,
     });
   }
