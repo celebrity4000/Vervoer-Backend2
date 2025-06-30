@@ -223,5 +223,4 @@ const dryCleanerSchema = new mongoose.Schema({
 export const DryCleaner = mongoose.model("DryCleaner", dryCleanerSchema );
 
 
-// dry cleaner driver
 

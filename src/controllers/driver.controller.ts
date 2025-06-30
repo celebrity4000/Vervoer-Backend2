@@ -5,7 +5,10 @@ import { ApiResponse } from "../utils/apirespone.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { z } from "zod";
+import bcrypt from "bcryptjs";
+import { jwtEncode } from "../utils/jwt.js";  // your existing JWT helper
 
+// Driver registration schema
 const DriverRegistrationSchema = z.object({
   phoneNumber: z.string().min(10),
   email: z.string().email(),
@@ -71,8 +74,7 @@ const DriverRegistrationSchema = z.object({
   }),
 });
 
-
-
+// Register driver controller
 export const registerDriver = asyncHandler(async (req: Request, res: Response) => {
   if (typeof req.body.attestation === "string") {
     req.body.attestation = JSON.parse(req.body.attestation);
@@ -86,6 +88,8 @@ export const registerDriver = asyncHandler(async (req: Request, res: Response) =
 
   const validatedData = DriverRegistrationSchema.parse(req.body);
 
+  const hashedPassword = await bcrypt.hash(validatedData.password, 10);
+
   const imageFields = [
     "driverLicenseImage",
     "vehicleInspectionImage",
@@ -94,7 +98,7 @@ export const registerDriver = asyncHandler(async (req: Request, res: Response) =
     "creditCardImage",
     "localCertificate",
     "driveProfileImage",
-    "electronicSignature"
+    "electronicSignature",
   ];
 
   const uploadedImages: any = {};
@@ -112,7 +116,7 @@ export const registerDriver = asyncHandler(async (req: Request, res: Response) =
     userType: validatedData.userType,
     phoneNumber: validatedData.phoneNumber,
     email: validatedData.email,
-    password: validatedData.password,
+    password: hashedPassword,
     firstName: validatedData.firstName,
     middleName: validatedData.middleName,
     lastName: validatedData.lastName,
@@ -153,3 +157,27 @@ export const registerDriver = asyncHandler(async (req: Request, res: Response) =
   res.status(201).json(new ApiResponse(201, { driver }, "Driver registered successfully"));
 });
 
+// login driver 
+
+export const loginDriver = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    throw new ApiError(400, "Email and password are required");
+  }
+
+  const driver = await Driver.findOne({ email });
+  if (!driver) {
+    throw new ApiError(401, "Invalid credentials");
+  }
+
+  const isPasswordValid = await bcrypt.compare(password, driver.password);
+  if (!isPasswordValid) {
+    throw new ApiError(401, "Invalid credentials");
+  }
+
+  // Generate JWT token
+  const token = jwtEncode({ id: driver._id, userType: "driver" });
+
+  res.status(200).json(new ApiResponse(200, { token }, "Login successful"));
+});

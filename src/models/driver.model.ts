@@ -66,7 +66,7 @@ export interface IDriver extends Document {
     noDiscriminateUser: boolean;
     willingVideoForSecurity: boolean;
     ongoingBackgroundAndLicenseCheck: boolean;
-    obeyTrafficLaws: boolean;
+    obeyTrafficLaws: boolean; 
     noAggressiveDriving: boolean;
     noUnsafeExperience: boolean;
     agreeToTerms: boolean;
