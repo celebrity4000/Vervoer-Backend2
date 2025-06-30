@@ -27,6 +27,14 @@ export const imageUpload = multer({
 export const imageUploadFields = imageUpload.fields([
   { name: "shopimage", maxCount: 10 },
   { name: "contactPersonImg", maxCount: 1 },
+  { name: "driverLicenseImage", maxCount: 2 },             
+  { name: "vehicleInspectionImage", maxCount: 5  },    
+  { name: "vehicleInsuranceImage", maxCount: 5 },          
+  { name: "driverCertificationImage", maxCount: 5 },       
+  { name: "creditCardImage", maxCount: 2 },           
+  { name: "localCertificate", maxCount: 5 },   
+  { name: "driveProfileImage", maxCount: 1} ,
+  { name: "electronicSignature", maxCount: 1 },
 ]);
 
 ;

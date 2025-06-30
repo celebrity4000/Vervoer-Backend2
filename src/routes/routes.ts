@@ -4,6 +4,7 @@ import { asyncHandler } from "../utils/asynchandler.js";
 import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
+import {registerDriver} from "../controllers/driver.controller.js";
 const router = Router();
 
 // User routes
@@ -40,6 +41,9 @@ router.delete(
 );
 router.get("/dry-cleaner", authenticate, getAllDryCleaners);
 router.post("/place-order/:dryCleanerId", authenticate, placeOrderToDryCleaner);
+
+// Driver registration route
+router.post("/register-driver", imageUploadFields, registerDriver);
 
 router.post("/social-register", socialRegister);
 
