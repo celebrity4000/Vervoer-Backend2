@@ -14,6 +14,7 @@ export interface IMerchant extends Document {
   otpExpiry?: Date;
   isVerified: boolean;
   haveGarage: boolean;
+  haveDryCleaner: boolean; 
 }
 
 const MerchantSchema = new Schema(
@@ -31,7 +32,8 @@ const MerchantSchema = new Schema(
       type: Boolean,
       default: false,
     },
-    haveResidence: {
+    
+    haveResidenceParking: {
       type: Boolean,
       default: false,
     },
@@ -186,47 +188,65 @@ const lotRentRecordSchema = new mongoose.Schema({
 export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
 export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
 
-const drycleanerSchema = new mongoose.Schema(
-  {
-    shopname: { type: String, required: true },
-    address: { type: String, required: true },
-    rating: { type: Number, default: 0 },
-    about: { type: String },
-    contactPerson: { type: String, required: true },
-    phoneNumber: { type: String, required: true },
-    contactPersonImg: { type: String },
-    shopimage: [{ type: String }],
-    hoursOfOperation: [
-      {
-        day: { type: String },
-        open: { type: String },
-        close: { type: String },
-      },
-    ],
-    services: [
-      {
-        name: { type: String },
-        category: { type: String , required: true },
-        strachLevel: { type: Number, enum: [1, 2, 3, 4, 5], default: 3 },
-        washOnly: { type: Boolean, default: false },
-        additionalservice: { type:String,enum:["zipper","button","wash/fold"], },
-        price: { type: Number },
-      },
-    ],
-    orders: [
-      {
-        serviceName: { type: String },
-        quantity: { type: Number },
-        price: { type: Number },
-        status: { type: String, enum: ["active", "completed"], default: "active" },
-      },
-    ],
+const addressSchema = new mongoose.Schema({
+  street:   { type: String, required: true },
+  city:     { type: String, required: true },
+  state:    { type: String, required: true },
+  zipCode:  { type: String, required: true },
+  country:  { type: String, required: true },
+}, { _id: false });
+
+const dryCleanerSchema = new mongoose.Schema({
+  owner: {
+    type: mongoose.Types.ObjectId,
+    ref: "Merchant",
+    required: true,
   },
-  { 
+  shopname: { type: String, required: true },
+
+  address: { type: addressSchema, required: true },  
+
+  rating: { type: Number, default: 0 },
+  about: { type: String },
+  contactPerson: { type: String, required: true },
+  phoneNumber: { type: String, required: true },
+  contactPersonImg: { type: String },
+  shopimage: [String],
+  hoursOfOperation: [
+    {
+      day: { type: String },
+      open: { type: String },
+      close: { type: String },
+    },
+  ],
+  services: [
+    {
+      name: { type: String, required: true },
+      category: { type: String, required: true },
+      strachLevel: { type: Number, enum: [1, 2, 3, 4, 5], default: 3 },
+      washOnly: { type: Boolean, default: false },
+      additionalservice: { type: String, enum: ["zipper", "button", "wash/fold"] },
+      price: { type: Number },
+    },
+  ],
+  orders: [
+    {
+      serviceName: String,
+      quantity: Number,
+      price: Number,
+      status: { type: String, enum: ["active", "completed"], default: "active" },
+    },
+  ],
+}, {
   timestamps: true,
   toJSON: { virtuals: true },
-  toObject: { virtuals: true }
-}
-);
+  toObject: { virtuals: true },
+});
 
-export const DryCleaner = mongoose.model("DryCleaner", drycleanerSchema );
+
+
+export const DryCleaner = mongoose.model("DryCleaner", dryCleanerSchema );
+
+
+// dry cleaner driver
+

@@ -1,13 +1,20 @@
 export const UserBaseSchemaFields = {
-  phoneNumber: { type: String, required: true,},
-  password: { type: String, required: true },
+  phoneNumber: { type: String },
+  password: { type: String },
   firstName: { type: String, required: true },
-  lastName: { type: String, required: true },
-  email: { type: String, required: true, },
-  country: { type: String, required: true },
-  state: { type: String, required: true },
-  zipCode: { type: String, required: true },
+  lastName: { type: String },
+  email: { type: String, required: true },
+  country: { type: String },
+  state: { type: String },
+  zipCode: { type: String },
+  userType: { type: String, enum: ["user", "driver", "merchant"], default: "user" },
   otp: { type: String },
   otpExpiry: { type: Date },
   isVerified: { type: Boolean, default: false },
+  loginType: {
+    type: String,
+    enum: ["normal", "google", "facebook"],
+    default: "normal"
+  },
+  socialId: { type: String },
 };
