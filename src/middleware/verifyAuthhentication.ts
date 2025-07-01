@@ -2,7 +2,7 @@ import { Request } from "express";
 import { jwtDecode } from "../utils/jwt.js";
 import z from "zod";
 import { ApiError } from "../utils/apierror.js";
-import { IUser, User } from "../models/normalUser.model.js";
+import { User } from "../models/normalUser.model.js";
 import { Driver } from "../models/driver.model.js";
 import { Merchant } from "../models/merchant.model.js";
 import jwt from "jsonwebtoken";

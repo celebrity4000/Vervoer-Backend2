@@ -3,5 +3,5 @@ out
 .env
 .env.*
 !.env.example
-
+pnpm-lock.yaml
 temp.*

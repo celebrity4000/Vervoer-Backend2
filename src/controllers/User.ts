@@ -1,7 +1,7 @@
 import { Request, Response, NextFunction } from "express";
-import { Merchant } from "../models/merchant.model.js";
-import { Driver } from "../models/driver.model.js";
-import { User } from "../models/normalUser.model.js";
+import { IMerchant, Merchant } from "../models/merchant.model.js";
+import { Driver, IDriver } from "../models/driver.model.js";
+import { IUser, User } from "../models/normalUser.model.js";
 import { sendEmail, generateOTP, getOtpExpiry } from "../utils/mailer.utils.js";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
@@ -12,6 +12,7 @@ import { jwtEncode } from "../utils/jwt.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import axios from "axios";
 import { asyncHandler } from "../utils/asynchandler.js";
+import mongoose from "mongoose";
 
 export const registerUser = async (
   req: Request,
@@ -266,7 +267,7 @@ export const loginUser = asyncHandler(
     }
 
     // If password missing for this user (social logins)
-    if (!existingUser.password) {
+    if (!existingUser?.password) {
       throw new ApiError(400, "Password login not available for this account");
     }
 
@@ -283,6 +284,8 @@ export const loginUser = asyncHandler(
     res.status(200).json({
       success: true,
       message: "Login successful",
+      user : existingUser,
+      userType ,
       token,
     });
   }

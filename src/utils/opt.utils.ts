@@ -12,7 +12,7 @@ export const getOtpExpiry = (): Date => {
  * @param diff in Days
  */
 export function getAllDate(startDate:Date , stopDate:Date , diff = 1){
-  let r : Date[] = [] ;
+  const r : Date[] = [] ;
   for(let date = startDate ; date <= stopDate ; ){
     r.push(date) ;
     date = new Date(date);

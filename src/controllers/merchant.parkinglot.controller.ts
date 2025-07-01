@@ -1,57 +1,54 @@
 import { Request, Response } from "express";
 import {
+  IParking,
   LotRentRecordModel,
-  Merchant,
   ParkingLotModel,
 } from "../models/merchant.model.js";
-import { BookingData, ParkingData } from "../zodTypes/parkingLotData.js";
+import { BookingData, ParkingData } from "../zodTypes/merchantData.js";
 import { ApiError } from "../utils/apierror.js";
 import z from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
-import { getAllDate } from "../utils/opt.utils.js";
-import { generateParkingSpaceID, getRecordList } from "../utils/lotProcessData.js";
+import { generateParkingSpaceID  } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
+import uploadToCloudinary from "../utils/cloudinary.js";
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
     try {
-      const rData = ParkingData.parse(req.body);
+      console.log("REQBODY: ",req.body)
       const verifiedAuth = await verifyAuthentication(req) ;
+      console.log(verifiedAuth)
       let owner = null ;
       if(verifiedAuth?.userType !== "merchant") {
         throw new ApiError(400, "INVALID_USER") ;
       }
       owner = verifiedAuth.user ;
-      if (
-        !(
-          rData.about &&
-          rData.address &&
-          rData.spacesList &&
-          rData.parkingName &&
-          rData.price 
-        )
-      ) {
-        throw new ApiError(400, "DATA VALIDATION");
-      }
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
+      const rData = ParkingData.parse(req.body);
+      let imageURL: string[] = [] ;
+      if(req.files){
+        if(Array.isArray(req.files)){
+          imageURL = await Promise.all(req.files.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url)) ;
+        }
+        else {
+          imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
+        }
+      }
+      rData.images = imageURL ;
+      
       const newParkingLot = await ParkingLotModel.create({
         owner: owner?._id,
-        parkingName: rData.parkingName,
-        about: rData.about,
-        price: rData.price,
-        address: rData.address,
-        spacesList: rData.spacesList,
-        generalAvailable : rData.generalAvailabel ,
+        ...rData
       });
-
       await newParkingLot.save();
       res.status(201).json(new ApiResponse(201, { parkingLot: newParkingLot }));
     } catch (err) {
       if (err instanceof z.ZodError) {
+        console.log("Errors ",err.issues) ;
         throw new ApiError(400, "DATA VALIDATION", err.issues);
       }
       throw err;
@@ -80,6 +77,16 @@ export const editParkingLot = asyncHandler(async (req: Request, res: Response) =
     }
 
     // Update the parking lot with new data
+    let imageURL: string[] = [] ;
+      if(req.files){
+        if(Array.isArray(req.files)){
+          imageURL = await Promise.all(req.files.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url)) ;
+        }
+        else {
+          imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
+        }
+      }
+    if(imageURL.length > 0) updateData.images = [...parkingLot.images, ...imageURL] ;
     const updatedParkingLot = await ParkingLotModel.findByIdAndUpdate(
       parkingLotId,
       { $set: updateData },
@@ -239,6 +246,69 @@ export const bookASlot = asyncHandler(
     } 
   }
 });
+export const getParkingLotbyId = asyncHandler(async (req,res)=>{
+  const lotId = req.params.id ;
+  const lotdetalis = await ParkingLotModel.findById(lotId);
+  if(lotdetalis){
+    res.status(200).json(new ApiResponse(200,lotdetalis));
+  }
+  else throw new ApiError(400,"NOT_FOUND");
+})
+export const deleteParking = asyncHandler(
+  async (req,res)=>{
+    try {
+      const lotId = z.string().parse(req.query.id) ;
+      const authUser = await verifyAuthentication(req) ;
+      if(!authUser?.user || authUser.userType!== "merchant" ) throw new ApiError(403,"UNKNOWN_USER") ;
+      const del = await ParkingLotModel.findOneAndDelete({
+        _id : lotId,
+        owner : authUser?.user
+      })
+      if(del){
+        res.status(200).json(new ApiResponse(200,del,"DELETE SUCCESSFUL"))
+      }else {
+        if(await ParkingLotModel.findById(lotId)) 
+          throw new ApiError(403,"ACCESS_DENIED");
+        else throw new ApiError(404,"NOT_FOUND");
+      }
+    } catch (error) {
+      if(error instanceof z.ZodError){
+        throw new ApiError(400,"INVALID_ID");
+      }
+      else throw error ;
+    }
+  }
+)
 
-// dry cleaner controller
+export const getListOfParkingLot = asyncHandler(async (req, res)=>{
+  try {
 
+  
+  const longitude = z.coerce.number().optional().parse(req.query.longitude) ;
+  const latitude = z.coerce.number().optional().parse(req.query.latitude) ;
+  console.log(longitude , latitude) ;
+  const queries: mongoose.FilterQuery<IParking> = {} ;
+  if(longitude && latitude) {
+    queries.gpsLocation = {
+      $near : {
+      $geometry: {
+        type : "Point",
+        coordinates :[longitude,latitude] ,
+      }
+    }}
+  }
+
+  const result = await ParkingLotModel.find(queries).exec() ;
+  if(result){
+    res.status(200).json(new ApiResponse(200,result))
+  }
+  else throw new ApiError(500) ;
+}catch(error){
+  if(error instanceof z.ZodError){
+    throw new ApiError(400,"INVALID_QUERY",error.issues);
+  }
+  else if(error instanceof ApiError) throw error ;
+  console.log(error) ;
+  throw new ApiError(500, "Server Error", error);
+}
+})

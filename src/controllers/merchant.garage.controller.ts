@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { Garage, GarageBooking } from "../models/merchant.garage.model.js";
+import { Garage, GarageBooking, IGarage } from "../models/merchant.garage.model.js";
 import { ApiError } from "../utils/apierror.js";
 import z from "zod/v4";
 import { ApiResponse } from "../utils/apirespone.js";
@@ -7,39 +7,41 @@ import { asyncHandler } from "../utils/asynchandler.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
 import { generateParkingSpaceID } from "../utils/lotProcessData.js";
+import uploadToCloudinary from "../utils/cloudinary.js";
 
 // Zod schemas for validation
 const GarageData = z.object({
   garageName: z.string().min(1, "Garage name is required"),
   about: z.string().min(1, "About is required"),
   address: z.string().min(1, "Address is required"),
+  price: z.coerce.number(),
   location: z.object({
     type: z.literal("Point"),
-    coordinates: z.tuple([z.number(), z.number()])
-  }),
-  contactNumber: z.string().min(1, "Contact number is required"),
-  email: z.string().email("Invalid email format"),
+    coordinates: z.tuple([z.coerce.number().gte(-180).lte(180), z.coerce.number().gte(-90).lte(90)])
+  }).optional(),
+  images : z.array(z.url()).optional(),
+  contactNumber: z.string().min(9, "Contact number is required"),
+  email: z.email().optional(),
   workingHours: z.array(z.object({
     day: z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]),
-    isOpen: z.boolean().default(true),
+    isOpen: z.coerce.boolean().default(true),
     openTime: z.string().optional(),
     closeTime: z.string().optional(),
-    is24Hours: z.boolean().default(false)
+    is24Hours: z.coerce.boolean().default(false)
   })),
-  images: z.array(z.string().url()).optional(),
-  is24x7: z.boolean().default(false),
+  is24x7: z.coerce.boolean().default(false),
   emergencyContact: z.object({
     phone: z.string(),
-    available: z.boolean()
+    available: z.coerce.boolean()
   }).optional(),
-  availableSlots: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.number().min(1).max(1000))
+  availableSlots: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number().min(1).max(1000))
 });
 
 const BookingData = z.object({
   garageId: z.string(),
   bookedSlot: z.object({
     zone : z.string().regex(/^[A-Z]{1,3}$/),
-    slot : z.number().max(1000).min(1)
+    slot : z.coerce.number().max(1000).min(1)
   }).transform((val)=>generateParkingSpaceID(val.zone,val.slot.toString())),
   bookingPeriod: z.object({
     from: z.iso.date(),
@@ -65,9 +67,20 @@ export const registerGarage = asyncHandler(
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
+      let imageURL:string[] = [] ;
+      if(req.files){
+        if(Array.isArray(req.files))
+            imageURL = await Promise.all(req.files.map(
+                (file)=>uploadToCloudinary(file.buffer))
+            ).then(e=>e.map(e=>e.secure_url));
+        else imageURL = await Promise.all(req.files.images.map(
+                (file)=>uploadToCloudinary(file.buffer))
+            ).then(e=>e.map(e=>e.secure_url));
+      }
 
       const newGarage = await Garage.create({
         owner: owner._id,
+        images: imageURL ,
         ...rData
       });
 
@@ -79,6 +92,7 @@ export const registerGarage = asyncHandler(
       res.status(201).json(new ApiResponse(201, { garage: newGarage }));
     } catch (err) {
       if (err instanceof z.ZodError) {
+        console.log(err.issues)
         throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
       }
       throw err;
@@ -110,6 +124,19 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
     }
 
     // Update the garage with new data
+    let imageURL:string[] = [] ;
+      if(req.files){
+        if(Array.isArray(req.files))
+            imageURL = await Promise.all(req.files.map(
+                (file)=>uploadToCloudinary(file.buffer))
+            ).then(e=>e.map(e=>e.secure_url));
+        else imageURL = await Promise.all(req.files.images.map(
+                (file)=>uploadToCloudinary(file.buffer))
+            ).then(e=>e.map(e=>e.secure_url));
+      }
+    if(imageURL.length > 0){
+        updateData.images = [...garage.images, ...imageURL]
+    }
     const updatedGarage = await Garage.findByIdAndUpdate(
       garageId,
       { $set: updateData },
@@ -132,7 +159,7 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
 /**
  * Get available slots for a garage
  */
-export const getAvailableSlots = asyncHandler(async (req: Request, res: Response) => {
+export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Response) => {
   try {
     const startDate = z.iso.date().parse(req.query.startDate);
     const endDate = z.iso.date().parse(req.query.endDate);
@@ -279,5 +306,56 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
       throw new ApiError(400, "INVALID_ID");
     }
     throw err;
+  }
+});
+
+export const deleteGarage = asyncHandler(async (req,res)=>{
+  try{
+  const garageId = z.string().parse(req.query.id);
+  const authUser = await verifyAuthentication(req);
+  if(!authUser?.user || authUser.userType !== "merchant") throw new ApiError(403,"UNAUTHORIZED_ACCESS")
+  const del = Garage.findOneAndDelete({
+    _id: garageId,
+    owner: authUser?.user
+  })
+  if(!del){
+    if(await Garage.findById(garageId))throw new ApiError(403, "ACCESS_DENIED");
+    throw new ApiError(404,"NOT_FOUND");
+  }else {
+    res.status(200).json(new ApiResponse(200,del)) ;
+  }
+  }catch(error){
+    if(error instanceof z.ZodError) throw new ApiError(400,"INVALID_DATA") ;
+    throw error ;
+  }
+})
+
+export const getListOfGarage = asyncHandler(async (req, res) => {
+  try {
+    const longitude = z.coerce.number().optional().parse(req.query.longitude);
+    const latitude = z.coerce.number().optional().parse(req.query.latitude);
+    console.log(longitude, latitude);
+    const queries: mongoose.FilterQuery<IGarage> = {};
+    if (longitude && latitude) {
+      queries.location = {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [longitude, latitude],
+          },
+        },
+      };
+    }
+
+    const result = await Garage.find(queries).exec();
+    if (result) {
+      res.status(200).json(new ApiResponse(200, result));
+    } else throw new ApiError(500);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "INVALID_QUERY", error.issues);
+    } else if (error instanceof ApiError) throw error;
+    console.log(error);
+    throw new ApiError(500, "Server Error", error);
   }
 });
