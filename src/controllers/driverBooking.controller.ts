@@ -124,6 +124,7 @@ export const cancelDriverBooking = asyncHandler(async (req: Request, res: Respon
   }
 
   booking.cancellationReason = reason;
+  
   await booking.save();
 
   await booking.deleteOne();

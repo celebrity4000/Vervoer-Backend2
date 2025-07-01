@@ -6,6 +6,8 @@ import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../cont
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {registerDriver,} from "../controllers/driver.controller.js";
+import { adminLogin , getAllUsers,getAllMerchants , deleteUser , deleteMerchant} from "../controllers/admin.controller.js";
+import { isAdmin } from "../middleware/isAdmin.middleware.js";
 const router = Router();
 
 // User routes
@@ -50,7 +52,16 @@ router.post("/create-booking", authenticate, createBooking);
 router.post("/book-driver-for-delivery", authenticate, bookDriverForDelivery);
 router.delete("/cancel-driver-booking/:id", authenticate, cancelDriverBooking);
 
+
+// Admin routes
+router.post("/admin-login",adminLogin);
+router.get("/admin/get-all-users", isAdmin, getAllUsers);
+router.get("/admin/get-all-merchants", isAdmin, getAllMerchants);
+router.delete("/admin/delete-user/:userId", isAdmin, deleteUser);
+router.delete("/admin/delete-merchant/:merchantId", isAdmin, deleteMerchant);
+
 router.post("/social-register", socialRegister);
 
 
 export default router;
+
