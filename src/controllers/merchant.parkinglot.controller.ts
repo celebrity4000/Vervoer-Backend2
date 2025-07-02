@@ -301,7 +301,7 @@ export const getListOfParkingLot = asyncHandler(async (req, res)=>{
   }
 
   if(owner){
-      queries._id = owner ;
+      queries.owner = owner ;
   }
   const result = await ParkingLotModel.find(queries).exec() ;
   if(result){
