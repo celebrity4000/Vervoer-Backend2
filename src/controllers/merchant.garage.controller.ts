@@ -334,8 +334,12 @@ export const getListOfGarage = asyncHandler(async (req, res) => {
   try {
     const longitude = z.coerce.number().optional().parse(req.query.longitude);
     const latitude = z.coerce.number().optional().parse(req.query.latitude);
+    const owner = z.string().optional().parse(req.query.owner) ;
     console.log(longitude, latitude);
     const queries: mongoose.FilterQuery<IGarage> = {};
+    if(owner){
+      queries._id = owner ;
+    }
     if (longitude && latitude) {
       queries.location = {
         $near: {

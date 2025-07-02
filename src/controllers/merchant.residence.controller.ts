@@ -161,6 +161,7 @@ export const getListOfResidence = asyncHandler(async (req, res)=>{
   
   const longitude = z.coerce.number().optional().parse(req.query.longitude) ;
   const latitude = z.coerce.number().optional().parse(req.query.latitude) ;
+  const owner = z.string().optional().parse(req.query.owner) ;
   console.log(longitude , latitude) ;
   const queries: mongoose.FilterQuery<IResident> = {} ;
   if(longitude && latitude) {
@@ -172,7 +173,9 @@ export const getListOfResidence = asyncHandler(async (req, res)=>{
       }
     }}
   }
-
+    if(owner){
+      queries._id = owner ;
+    }
   const result = await ResidenceModel.find(queries).exec() ;
   if(result){
     res.status(200).json(new ApiResponse(200,result))

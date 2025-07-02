@@ -166,10 +166,10 @@ export const bookASlot = asyncHandler(async (req, res) => {
   try {
     const vUser = await verifyAuthentication(req);
 
-    if (!(vUser?.userType === "user" && vUser?.user.isVerified)) {
+    if (!(vUser?.userType === "user")) {
       throw new ApiError(401, "User must be a verified user");
     }
-
+    console.log(req.body);
     const rData = BookingData.parse(req.body);
 
     const files = req.files as { [fieldname: string]: Express.Multer.File[] };
@@ -285,7 +285,7 @@ export const deleteParking = asyncHandler(
 export const getListOfParkingLot = asyncHandler(async (req, res)=>{
   try {
 
-  
+  const owner = z.string().optional().parse(req.query.owner) ;
   const longitude = z.coerce.number().optional().parse(req.query.longitude) ;
   const latitude = z.coerce.number().optional().parse(req.query.latitude) ;
   console.log(longitude , latitude) ;
@@ -300,6 +300,9 @@ export const getListOfParkingLot = asyncHandler(async (req, res)=>{
     }}
   }
 
+  if(owner){
+      queries._id = owner ;
+  }
   const result = await ParkingLotModel.find(queries).exec() ;
   if(result){
     res.status(200).json(new ApiResponse(200,result))
