@@ -12,6 +12,8 @@ import { asyncHandler } from "../utils/asynchandler.js";
 import { generateParkingSpaceID  } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
+import { IUser } from "../models/normalUser.model.js";
+
 import uploadToCloudinary from "../utils/cloudinary.js";
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
@@ -158,94 +160,94 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
   }
 });
 
-export const bookASlot = asyncHandler(
-  async (req, res) => {
-  //TODO: AUTHENTICATE USER
+export const bookASlot = asyncHandler(async (req, res) => {
   let session: mongoose.ClientSession | undefined;
+
   try {
-    const vUser =await  verifyAuthentication(req) ;
-    console.log(vUser) ;
-    if(!(vUser?.userType === "user" && vUser?.user.isVerified)){
-      throw new ApiError(401,"User Must be verified user");
+    const vUser = await verifyAuthentication(req);
+
+    if (!(vUser?.userType === "user" && vUser?.user.isVerified)) {
+      throw new ApiError(401, "User must be a verified user");
     }
+
     const rData = BookingData.parse(req.body);
-    // check the lotId is available 
-    const parkingLot = await ParkingLotModel.findById(rData.lotId) ;
-    if(!parkingLot) throw new ApiError(400, "INVALID_LOTID") ;
-    console.log(parkingLot) ;
-    if(parkingLot && (parkingLot.spacesList?.get(rData.rentedSlot.zone)||0)<= rData.rentedSlot.slot) {
-      throw new ApiError(400, "INVALID_SELECTED_ZONE") ;
+
+    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+    const carLicensePlateImage = files["carLicensePlateImage"]?.[0];
+    if (!carLicensePlateImage) {
+      throw new ApiError(400, "Car license plate image is required");
     }
-    LotRentRecordModel.createCollection()
-      .then(() => LotRentRecordModel.startSession())
-      .then(async (_session) => {
-        session = _session;
-        session.startTransaction();
-        // check the slot is free or not
-        const result = await LotRentRecordModel.find(
-          {
-            lotId: rData.lotId,
-            rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
-            $or: [
-              {
-                $and: [
-                  // collision with starting date
-                  { rentFrom: { $lte: rData.rentFrom } },
-                  { rentTo: { $gte: rData.rentFrom } },
-                ],
-              },
-              {
-                $and: [
-                  // collision with end date
-                  { rentFrom: { $lte: rData.rentTo } },
-                  { rentTo: { $gte: rData.rentTo } },
-                ],
-              },
-              {
-                $and: [
-                  // collision within  date
-                  { rentFrom: { $gte: rData.rentFrom } },
-                  { rentTo: { $lte: rData.rentTo } },
-                ],
-              },
-            ],
-          },
-          "-renterInfo"
-        ).exec();
-        console.log("result: ",result)
-        if (result.length > 0) {
-          throw new ApiError(400, "NOT_AVAILABLE", result);
-        }
-        const booked = await LotRentRecordModel.create(
-          {
-            lotId: rData.lotId,
-            rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
-            rentFrom: new Date(rData.rentFrom),
-            rentTo: new Date(rData.rentTo),
-            renterInfo: vUser.user._id,
-          }
-        );
-        console.log("booked: ",booked)
-        if(!booked) throw new ApiError(400,"FAILED BOOKING");
-        // await (await booked.populate("renterInfo")).populate("lotId");
-        session.commitTransaction() ;
-        if (booked) {
-          session = undefined ;
-          res
-            .status(201)
-            .json(new ApiResponse(201, { bookingInfo: booked}));
-        }
-      });
+
+    const uploadResult = await uploadToCloudinary(carLicensePlateImage.buffer);
+    if (!uploadResult.secure_url) {
+      throw new ApiError(500, "Failed to upload license plate image");
+    }
+
+    const imageUrl = uploadResult.secure_url;
+
+    if (vUser.userType === "user") {
+      const normalUser = vUser.user as IUser;
+      normalUser.carLicensePlateImage = imageUrl;
+      await normalUser.save();
+    }
+
+    const parkingLot = await ParkingLotModel.findById(rData.lotId);
+    if (!parkingLot) throw new ApiError(400, "Invalid lotId");
+
+    if ((parkingLot.spacesList?.get(rData.rentedSlot.zone) || 0) <= rData.rentedSlot.slot) {
+      throw new ApiError(400, "Invalid selected zone/slot");
+    }
+
+    await LotRentRecordModel.createCollection();
+    session = await LotRentRecordModel.startSession();
+    session.startTransaction();
+
+    const slotConflicts = await LotRentRecordModel.find(
+      {
+        lotId: rData.lotId,
+        rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
+        $or: [
+          { $and: [{ rentFrom: { $lte: rData.rentFrom } }, { rentTo: { $gte: rData.rentFrom } }] },
+          { $and: [{ rentFrom: { $lte: rData.rentTo } }, { rentTo: { $gte: rData.rentTo } }] },
+          { $and: [{ rentFrom: { $gte: rData.rentFrom } }, { rentTo: { $lte: rData.rentTo } }] },
+        ],
+      },
+      "-renterInfo"
+    ).exec();
+
+    if (slotConflicts.length > 0) {
+      throw new ApiError(400, "Selected slot not available for these dates", slotConflicts);
+    }
+
+    const booked = await LotRentRecordModel.create({
+      lotId: rData.lotId,
+      rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
+      rentFrom: new Date(rData.rentFrom),
+      rentTo: new Date(rData.rentTo),
+      renterInfo: vUser.user._id,
+    });
+
+    if (!booked) throw new ApiError(400, "Failed booking");
+
+    await session.commitTransaction();
+    session = undefined;
+
+    res.status(201).json(new ApiResponse(201, { bookingInfo: booked }, "Slot booked successfully"));
+
   } catch (err) {
-    if(session) session.abortTransaction();
+    if (session) await session.abortTransaction();
+
     if (err instanceof z.ZodError) {
-      console.log(err) ;
-      throw new ApiError(400, "INVALID_QUERY");
+      console.error(err);
+      throw new ApiError(400, "Invalid booking data");
     } else {
       throw err;
-    } 
+    }
   }
 });
+
+
+
 export const getParkingLotbyId = asyncHandler(async (req,res)=>{
   const lotId = req.params.id ;
   const lotdetalis = await ParkingLotModel.findById(lotId);

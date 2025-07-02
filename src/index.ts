@@ -1,4 +1,5 @@
 import express, { Application, Request, Response } from "express";
+import cors from "cors";  
 import dotenv from "dotenv";
 import { connectDB } from "./DB/mongodb.js";
 import { createServer } from "http";
@@ -10,11 +11,19 @@ dotenv.config({
   path: "./.env",
 });
 console.log(process.env)
+
 const app: Application = express();
 const httpServer = createServer(app);
+
+// CORS middleware here ⬇️
+app.use(cors({
+  origin: "http://localhost:5173", 
+  credentials: true
+}));
+
 const io = new Server(httpServer, {
   cors: {
-    origin: "*",
+    origin: "*",  
   },
 });
 
@@ -27,7 +36,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/merchants", merchantRouter);
 
 app.get("/", (req: Request, res: Response) => {
-  res.status(200).send("Welcome To Vervour");
+  res.status(200).send("Welcome To Vervoer");
 });
 
 connectDB()

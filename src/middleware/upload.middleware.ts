@@ -35,6 +35,7 @@ export const imageUploadFields = imageUpload.fields([
   { name: "localCertificate", maxCount: 5 },   
   { name: "driveProfileImage", maxCount: 1} ,
   { name: "electronicSignature", maxCount: 1 },
+  { name: "carLicensePlateImage", maxCount: 1 },
 ]);
 
 ;

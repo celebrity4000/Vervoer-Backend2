@@ -13,11 +13,13 @@ export interface IUser extends Document {
   otp?: string;
   otpExpiry?: Date;
   isVerified: boolean;
+  carLicensePlateImage?: string;
 }
 
 const UserSchema = new Schema(
   {
     ...UserBaseSchemaFields,
+    carLicensePlateImage: { type: String,},
   },
   { timestamps: true }
 );
