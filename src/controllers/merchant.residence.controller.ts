@@ -174,7 +174,7 @@ export const getListOfResidence = asyncHandler(async (req, res)=>{
     }}
   }
     if(owner){
-      queries._id = owner ;
+      queries.owner = owner ;
     }
   const result = await ResidenceModel.find(queries).exec() ;
   if(result){

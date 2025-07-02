@@ -338,7 +338,7 @@ export const getListOfGarage = asyncHandler(async (req, res) => {
     console.log(longitude, latitude);
     const queries: mongoose.FilterQuery<IGarage> = {};
     if(owner){
-      queries._id = owner ;
+      queries.owner = owner ;
     }
     if (longitude && latitude) {
       queries.location = {
