@@ -4,34 +4,73 @@ import { ApiResponse } from "../utils/apirespone.js";
 import jwt from "jsonwebtoken";
 import { User } from "../models/normalUser.model.js";
 import { Merchant } from "../models/merchant.model.js";
+import { sendEmail,generateOTP,getOtpExpiry } from "../utils/mailer.utils.js";
 
+// In-memory temporary store for OTP and expiry
+let adminOtp: string | null = null;
+let adminOtpExpiry: Date | null = null;
 
-export const adminLogin = (req: Request, res: Response) => {
-  const { email, password } = req.body;
+// send OTP to admin email
+export const sendAdminOtp = async (req: Request, res: Response) => {
+  const { email } = req.body;
 
-  if (
-    email !== process.env.ADMIN_EMAIL ||
-    password !== process.env.ADMIN_PASSWORD
-  ) {
-    throw new ApiError(401, "Invalid admin credentials");
+  if (email !== process.env.ADMIN_EMAIL) {
+    throw new ApiError(401, "Invalid admin email");
   }
 
+  const otp = generateOTP();
+  adminOtp = otp;
+  adminOtpExpiry = getOtpExpiry();
+
+  await sendEmail(email, "Your Admin Login OTP", `Your OTP is: ${otp}`);
+
+  res.status(200).json({
+    success: true,
+    message: "OTP sent to admin email.",
+  });
+};
+
+// verify OTP and generate token
+export const verifyAdminOtp = (req: Request, res: Response) => {
+  const { email, otp } = req.body;
+
+  if (email !== process.env.ADMIN_EMAIL) {
+    throw new ApiError(401, "Invalid admin email");
+  }
+
+  if (!adminOtp || !adminOtpExpiry) {
+    throw new ApiError(400, "No OTP generated. Please request a new OTP.");
+  }
+
+  if (new Date() > adminOtpExpiry) {
+    adminOtp = null;
+    adminOtpExpiry = null;
+    throw new ApiError(400, "OTP expired. Please request a new one.");
+  }
+
+  if (otp !== adminOtp) {
+    throw new ApiError(400, "Invalid OTP");
+  }
+
+  // Clear OTP after successful login
+  adminOtp = null;
+  adminOtpExpiry = null;
+
   const token = jwt.sign(
-    { role: "admin" }, 
+    { role: "admin" },
     process.env.JWT_SECRET as string,
     { expiresIn: "1h" }
   );
 
   res.status(200).json({
     success: true,
-    message: "Admin logged in successfully",
+    message: "Admin logged in successfully.",
     token,
   });
 };
 
-
 export const getAllUsers = async (req: Request, res: Response) => {
-   const users = await User.find({}, "firstName email phoneNumber");
+   const users = await User.find({}, "firstName email phoneNumber carLicensePlateImage");
 
   res.status(200).json(
     new ApiResponse(200, { users }, "Fetched all user data")
