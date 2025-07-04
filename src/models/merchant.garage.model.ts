@@ -121,7 +121,7 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
         const now = new Date();
         const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
     
-        const todayHours = this.workingHours.find(wh => wh.day === today);
+        const todayHours = this.generalAvailable.find(wh => wh.day === today);
         
         if (!todayHours || !todayHours.isOpen) return false;
         if (todayHours.is24Hours) return true;
