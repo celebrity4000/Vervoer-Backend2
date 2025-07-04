@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { registerUser, verifyOtp,socialRegister, loginUser} from "../controllers/User.js";  
+import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtp,resetForgottenPassword} from "../controllers/User.js";  
 import { asyncHandler } from "../utils/asynchandler.js";
 import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
 import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../controllers/driverBooking.controller.js";
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {registerDriver,} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant} from "../controllers/admin.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin} from "../controllers/admin.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 const router = Router();
@@ -15,6 +15,12 @@ const router = Router();
 router.post("/register", asyncHandler(registerUser));
 router.post("/verify-otp", asyncHandler(verifyOtp));
 router.post("/login", loginUser);
+router.post("/logout", authenticate, logoutUser);
+router.post("/forgot-password", sendForgotPasswordOtp);
+router.post("/verify-forgot-password-otp", verifyForgotPasswordOtp);
+router.post("/reset-password", resetForgottenPassword);
+
+
 // Dry cleaner registration route with image upload middleware
 router.post(
   "/dry-cleaner",  
@@ -61,6 +67,7 @@ router.get("/admin/get-all-users", isAdmin, getAllUsers);
 router.get("/admin/get-all-merchants", isAdmin, getAllMerchants);
 router.delete("/admin/delete-user/:userId", isAdmin, deleteUser);
 router.delete("/admin/delete-merchant/:merchantId", isAdmin, deleteMerchant);
+router.post("/admin/logout", isAdmin, logoutAdmin);
 
 // Payment gateway route
 router.post("/create-payment", authenticate, createPayment);

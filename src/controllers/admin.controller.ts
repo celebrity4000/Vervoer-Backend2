@@ -5,6 +5,7 @@ import jwt from "jsonwebtoken";
 import { User } from "../models/normalUser.model.js";
 import { Merchant } from "../models/merchant.model.js";
 import { sendEmail,generateOTP,getOtpExpiry } from "../utils/mailer.utils.js";
+import { BlacklistedToken } from "../models/blacklistedToken.model.js";
 
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
@@ -110,3 +111,29 @@ export const deleteMerchant = async (req: Request, res: Response) => {
     new ApiResponse(200, {}, "Merchant deleted successfully")
   );
 }
+
+
+// logout 
+export const logoutAdmin = async (req: Request, res: Response) => {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  const decoded: any = jwt.decode(token);
+  if (!decoded || !decoded.exp) {
+    throw new ApiError(400, "Invalid token");
+  }
+
+  await BlacklistedToken.create({
+    token,
+    expiresAt: new Date(decoded.exp * 1000),
+  });
+
+  res.status(200).json(
+    new ApiResponse(200, {}, "Admin logged out successfully")
+  );
+};

@@ -12,6 +12,7 @@ import { jwtEncode } from "../utils/jwt.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import axios from "axios";
 import { asyncHandler } from "../utils/asynchandler.js";
+import { BlacklistedToken } from "../models/blacklistedToken.model.js";
 import mongoose from "mongoose";
 
 export const registerUser = async (
@@ -290,3 +291,138 @@ export const loginUser = asyncHandler(
     });
   }
 );
+
+
+// logout User
+export const logoutUser = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ success: false, message: "No token provided" });
+      return;
+    }
+
+    const token = authHeader.split(" ")[1];
+
+    const decoded: any = jwt.decode(token);
+    if (!decoded || !decoded.exp) {
+      res.status(400).json({ success: false, message: "Invalid token" });
+      return;
+    }
+
+    await BlacklistedToken.create({
+      token,
+      expiresAt: new Date(decoded.exp * 1000),
+    });
+
+    res.status(200).json({ success: true, message: "Logged out successfully" });
+  }
+);
+
+
+
+export const forgotPasswordSchema = z.object({
+  email: z.string().email(),
+  userType: z.enum(["user", "merchant", "driver"]),
+});
+
+export const verifyOtpSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().length(6),
+  userType: z.enum(["user", "merchant", "driver"]),
+});
+
+export const resetPasswordSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+  confirmPassword: z.string().min(6),
+  userType: z.enum(["user", "merchant", "driver"]),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "Passwords do not match",
+  path: ["confirmPassword"],
+});
+
+
+const getUserModel = (type: string): mongoose.Model<any> => {
+  if (type === "merchant") return Merchant;
+  if (type === "driver") return Driver;
+  return User;
+};
+
+//  Send OTP to email
+export const sendForgotPasswordOtp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, userType } = forgotPasswordSchema.parse(req.body);
+    const UserModel = getUserModel(userType);
+
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    const otp = generateOTP();
+    const otpExpiry = getOtpExpiry();
+
+    user.otp = otp;
+    user.otpExpiry = otpExpiry;
+    await user.save();
+
+    await sendEmail(email, "Password Reset OTP", `Your OTP is: ${otp}`);
+
+    res.status(200).json({ success: true, message: "OTP sent to email" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Verify OTP
+export const verifyForgotPasswordOtp = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, otp, userType } = verifyOtpSchema.parse(req.body);
+    const UserModel = getUserModel(userType);
+
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    if (user.otp !== otp) {
+      throw new ApiError(400, "Invalid OTP");
+    }
+
+    if (user.otpExpiry && user.otpExpiry < new Date()) {
+      throw new ApiError(400, "OTP expired");
+    }
+
+    user.otp = undefined;
+    user.otpExpiry = undefined;
+    user.isVerified = true;
+    await user.save();
+
+    res.status(200).json({ success: true, message: "OTP verified successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// Reset Password
+export const resetForgottenPassword = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { email, password, confirmPassword, userType } = resetPasswordSchema.parse(req.body);
+    const UserModel = getUserModel(userType);
+
+    const user = await UserModel.findOne({ email });
+    if (!user) {
+      throw new ApiError(404, "User not found");
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user.password = hashedPassword;
+    await user.save();
+    const newToken = jwtEncode({ userId: user._id, userType });
+    res.status(200).json({ success: true, message: "Password reset successfully" });
+  } catch (error) {
+    next(error);
+  }
+};
