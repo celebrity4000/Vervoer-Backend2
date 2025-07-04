@@ -22,7 +22,7 @@ const GarageData = z.object({
   images : z.array(z.url()).optional(),
   contactNumber: z.string().min(9, "Contact number is required"),
   email: z.email().optional(),
-  workingHours: z.array(z.object({
+  generalAvailable: z.array(z.object({
     day: z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]),
     isOpen: z.coerce.boolean().default(true),
     openTime: z.string().optional(),
