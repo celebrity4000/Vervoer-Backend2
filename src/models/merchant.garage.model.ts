@@ -22,7 +22,7 @@ export interface IGarage {
   images: string[];
   isVerified: boolean;
   isActive: boolean;
-  availableSlots: Map<string, number>;
+  spacesList: Map<string, number>;
   is24x7: boolean;
   emergencyContact?: {
     person: string;
@@ -99,7 +99,7 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       type: Boolean,
       default: true
     },
-    availableSlots: {
+    spacesList: {
       type: Map,
       of: Number
     },
@@ -134,8 +134,8 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       },
       getAllSlots : function(){
         const res = new Set<string>()
-        if(this.availableSlots){
-          this.availableSlots.forEach((value:number ,key:string)=>{
+        if(this.spacesList){
+          this.spacesList.forEach((value:number ,key:string)=>{
             for(let i = 1 ; i <= value ; i++){
                 res.add(generateParkingSpaceID(key,i.toString())) ;
             }

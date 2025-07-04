@@ -19,7 +19,7 @@ merchantRouter.post("/garage/registration",imageUpload.array("images", 10), regi
 merchantRouter.put("/garage/update/:id",imageUpload.array("images", 10), editGarage) ;
 merchantRouter.delete("/garage/delete/:id",deleteGarage) ;
 merchantRouter.get("/garage/getavailable",getAvailableGarageSlots) ;
-merchantRouter.post("/garage/book",bookGarageSlot) ;
+merchantRouter.post("/garage/book",imageUploadFields, bookGarageSlot) ;
 merchantRouter.get("/garage/search", getListOfGarage) ;
 merchantRouter.get("/garage/:id", getGarageDetails) ;
 

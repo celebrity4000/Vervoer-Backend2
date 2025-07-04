@@ -34,7 +34,7 @@ const GarageData = z.object({
     phone: z.string(),
     available: z.coerce.boolean()
   }).optional(),
-  availableSlots: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number().min(1).max(1000))
+  spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number().min(1).max(1000))
 });
 
 const BookingData = z.object({
@@ -42,7 +42,7 @@ const BookingData = z.object({
   bookedSlot: z.object({
     zone : z.string().regex(/^[A-Z]{1,3}$/),
     slot : z.coerce.number().max(1000).min(1)
-  }).transform((val)=>generateParkingSpaceID(val.zone,val.slot.toString())),
+  }),
   bookingPeriod: z.object({
     from: z.iso.date(),
     to: z.iso.date()
@@ -167,9 +167,11 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
 
     const garage = await Garage.findById(garageId);
     if (!garage) {
-      throw new ApiError(404, "GARAGE_NOT_FOUND");
+      console.log("ID:",garageId)
+      throw new ApiError(400, "GARAGE_NOT_FOUND");
     }
-    const totalSpace = garage.availableSlots?.values().toArray().reduce((acc, val) => acc + val, 0) || 0;
+    let totalSpace = 0 ;
+    garage.spacesList?.forEach((e)=>{totalSpace+=e})
     // Get all bookings that overlap with the requested time period
     const bookings = await GarageBooking.find({
       garageId,
@@ -190,14 +192,15 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
     
 
     res.status(200).json(new ApiResponse(200, { 
-      availableSlots: totalSpace - bookings.length,
-      bookedSlot : bookings ,
+      availableSpace: totalSpace - bookings.length,
+      bookedSlot : bookings.map((e)=>({rentedSlot : e.bookedSlot, rentFrom : e.bookingPeriod?.from , rentTo : e.bookingPeriod?.to})) ,
       isOpen: garage.isOpenNow()
     }));
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new ApiError(400, "INVALID_QUERY", err.issues);
     }
+    console.log(err) ;
     throw err;
   }
 });
@@ -211,7 +214,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
   try {
     const verifiedUser = await verifyAuthentication(req);
     
-    if (!(verifiedUser?.userType === "user" && verifiedUser?.user.isVerified)) {
+    if (!(verifiedUser?.userType === "user" )) {
       throw new ApiError(401, "User must be a verified user");
     }
 
@@ -223,8 +226,8 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       throw new ApiError(404, "GARAGE_NOT_FOUND");
     }
 
-    // Check if the slot exists in availableSlots
-    const maxSlots = garage.availableSlots?.get(rData.bookedSlot) || 0;
+    // Check if the slot exists in spacesList
+    const maxSlots = garage.spacesList?.get(rData.bookedSlot.zone) || 0;
     if (maxSlots <= 0) {
       throw new ApiError(400, "INVALID_SLOT");
     }
@@ -236,7 +239,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     // Check for overlapping bookings
     const existingBookings = await GarageBooking.countDocuments({
       garageId: rData.garageId,
-      bookedSlot: rData.bookedSlot,
+      bookedSlot: generateParkingSpaceID(rData.bookedSlot.zone, rData.bookedSlot.slot.toString()),
       $or: [
         {
           'bookingPeriod.from': { $lt: new Date(rData.bookingPeriod.to) },
@@ -259,7 +262,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     const booking = await GarageBooking.create([{
       garageId: rData.garageId,
       customerId: verifiedUser.user._id,
-      bookedSlot: rData.bookedSlot,
+      bookedSlot: generateParkingSpaceID(rData.bookedSlot.zone, rData.bookedSlot.slot.toString()) ,
       bookingPeriod: {
         from: new Date(rData.bookingPeriod.from),
         to: new Date(rData.bookingPeriod.to)
@@ -275,6 +278,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       await session.abortTransaction();
     }
     if (err instanceof z.ZodError) {
+      console.log(err.issues) ;
       throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
     }
     throw err;
