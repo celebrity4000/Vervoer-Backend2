@@ -10,7 +10,7 @@ export interface IGarage {
   contactNumber: string;
   price: number,
   email?: string;
-  workingHours: [
+  generalAvailable : [
     {
       day: "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
       isOpen?: boolean;
@@ -73,7 +73,7 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       trim: true,
       lowercase: true
     },
-    workingHours: [{
+    generalAvailable: [{
       day: {
         type: String,
         enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
