@@ -2,6 +2,7 @@ export class ApiError extends Error {
   public statusCode: number;
   public data: null;
   public success: boolean;
+  public message: string;
   public errors: unknown[] | unknown;
 
   constructor(

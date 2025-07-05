@@ -162,18 +162,25 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       ref: "User",
       required: true
     },
-    bookingPeriod : {
+    bookingPeriod :{ 
+      type : {
       from : {type : Date, required : true} ,
-      to : {type : Date, required : true} ,
+      to : {type : Date, required : true} 
+      }, 
+      required : true 
     },
+    vehicleNumber : String,
     bookedSlot : {type :String, required : true} ,
-    amountToPaid : Number ,
-    // paymentDetails : {
-    //   transactionId : String ,
-    //   amount : Number ,
-    //   method : {type : String , enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]},
-    //   successful : {type : Boolean},
-    // }
+    totalAmount : { type : Number , required : true},
+    amountToPaid : { type : Number , required : true},
+    couponCode : String ,
+    discount :{type : Number , default :0 },
+    paymentDetails : {
+      transactionId : String ,
+      amount : Number ,
+      method : {type : String , enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]},
+      status : {type : String , enum: ["PENDING", "SUCCESS", "FAILED"]},
+    }
   }, { timestamps: true });
   
   export const Garage = mongoose.model("Garage", garageSchema);
