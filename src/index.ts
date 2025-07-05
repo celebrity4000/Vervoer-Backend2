@@ -10,7 +10,6 @@ import merchantRouter from "./routes/merchant.routes.js";
 dotenv.config({
   path: "./.env",
 });
-console.log(process.env)
 
 const app: Application = express();
 const httpServer = createServer(app);
