@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
+import { BankDetailsSchema } from "./bankDetails.model.js";
 
 export interface IUser extends Document {
   phoneNumber: string;
@@ -14,12 +15,20 @@ export interface IUser extends Document {
   otpExpiry?: Date;
   isVerified: boolean;
   carLicensePlateImage?: string;
+   bankDetails?: {
+    accountNumber?: string;
+    ifscCode?: string;
+    accountHolderName?: string;
+    branch?: string;
+  };
+  
 }
 
 const UserSchema = new Schema(
   {
     ...UserBaseSchemaFields,
     carLicensePlateImage: { type: String,},
+    bankDetails: BankDetailsSchema,
   },
   { timestamps: true }
 );

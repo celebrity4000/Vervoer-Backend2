@@ -17,4 +17,4 @@ export const UserBaseSchemaFields = {
     default: "normal"
   },
   socialId: { type: String },
-};
+}

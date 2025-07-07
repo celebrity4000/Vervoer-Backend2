@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response ,NextFunction} from "express";
 import { ApiError } from "../utils/apierror.js";
 import z from "zod";
 import { ApiResponse } from "../utils/apirespone.js";
@@ -7,6 +7,7 @@ import { DryCleaner } from "../models/merchant.model.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { jwtEncode } from "../utils/jwt.js";
 import { IMerchant } from "../models/merchant.model.js";
+import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 
 const addressSchema = z.object({
   street: z.string(),
@@ -102,6 +103,7 @@ export const registerDryCleaner = asyncHandler(
     );
   }
 );
+
 
 
 

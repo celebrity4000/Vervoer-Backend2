@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
+import { BankDetailsSchema ,IBankDetails} from "./bankDetails.model.js";
 
 export interface IMerchant extends Document {
   phoneNumber: string;
@@ -14,29 +15,20 @@ export interface IMerchant extends Document {
   otpExpiry?: Date;
   isVerified: boolean;
   haveGarage: boolean;
-  haveDryCleaner: boolean; 
+  haveDryCleaner: boolean;
+  haveParkingLot: boolean;
+  haveResidenceParking: boolean;
+  bankDetails?: IBankDetails;
 }
 
 const MerchantSchema = new Schema(
   {
     ...UserBaseSchemaFields,
-    haveParkingLot: {
-      type: Boolean,
-      default: false,
-    },
-    haveGarage: {
-      type: Boolean,
-      default: false,
-    },
-    haveDryCleaner: {
-      type: Boolean,
-      default: false,
-    },
-    
-    haveResidenceParking: {
-      type: Boolean,
-      default: false,
-    },
+    haveParkingLot: { type: Boolean, default: false },
+    haveGarage: { type: Boolean, default: false },
+    haveDryCleaner: { type: Boolean, default: false },
+    haveResidenceParking: { type: Boolean, default: false },
+    bankDetails: BankDetailsSchema,
   },
   { timestamps: true }
 );
