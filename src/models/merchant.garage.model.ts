@@ -22,7 +22,7 @@ export interface IGarage {
   images: string[];
   isVerified: boolean;
   isActive: boolean;
-  availableSlots: Map<string, number>;
+  spacesList: Map<string, number>;
   is24x7: boolean;
   emergencyContact?: {
     person: string;
@@ -99,7 +99,7 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       type: Boolean,
       default: true
     },
-    availableSlots: {
+    spacesList: {
       type: Map,
       of: Number
     },
@@ -121,7 +121,7 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
         const now = new Date();
         const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
     
-        const todayHours = this.workingHours.find(wh => wh.day === today);
+        const todayHours = this.generalAvailable.find(wh => wh.day === today);
         
         if (!todayHours || !todayHours.isOpen) return false;
         if (todayHours.is24Hours) return true;
@@ -134,8 +134,8 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       },
       getAllSlots : function(){
         const res = new Set<string>()
-        if(this.availableSlots){
-          this.availableSlots.forEach((value:number ,key:string)=>{
+        if(this.spacesList){
+          this.spacesList.forEach((value:number ,key:string)=>{
             for(let i = 1 ; i <= value ; i++){
                 res.add(generateParkingSpaceID(key,i.toString())) ;
             }
@@ -162,18 +162,25 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
       ref: "User",
       required: true
     },
-    bookingPeriod : {
+    bookingPeriod :{ 
+      type : {
       from : {type : Date, required : true} ,
-      to : {type : Date, required : true} ,
+      to : {type : Date, required : true} 
+      }, 
+      required : true 
     },
+    vehicleNumber : String,
     bookedSlot : {type :String, required : true} ,
-    amountToPaid : Number ,
-    // paymentDetails : {
-    //   transactionId : String ,
-    //   amount : Number ,
-    //   method : {type : String , enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]},
-    //   successful : {type : Boolean},
-    // }
+    totalAmount : { type : Number , required : true},
+    amountToPaid : { type : Number , required : true},
+    couponCode : String ,
+    discount :{type : Number , default :0 },
+    paymentDetails : {
+      transactionId : String ,
+      amount : Number ,
+      method : {type : String , enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]},
+      status : {type : String , enum: ["PENDING", "SUCCESS", "FAILED"]},
+    }
   }, { timestamps: true });
   
   export const Garage = mongoose.model("Garage", garageSchema);
