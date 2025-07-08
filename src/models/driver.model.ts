@@ -77,6 +77,7 @@ export interface IDriver extends Document {
     electronicSignature: string;
     attestationDate: Date;
   };
+  stripeCustomerId?: string;
 }
 
 const DriverSchema = new Schema<IDriver>(

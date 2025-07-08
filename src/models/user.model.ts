@@ -11,6 +11,7 @@ export const UserBaseSchemaFields = {
   otp: { type: String },
   otpExpiry: { type: Date },
   isVerified: { type: Boolean, default: false },
+  stripeCustomerId : String ,
   loginType: {
     type: String,
     enum: ["normal", "google", "facebook"],

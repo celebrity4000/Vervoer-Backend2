@@ -6,6 +6,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import userRoutes from "./routes/routes.js";
 import merchantRouter from "./routes/merchant.routes.js";
+import { ApiResponse } from "./utils/apirespone.js";
+import { StripePublicKey } from "./utils/stripePayments.js";
 
 dotenv.config({
   path: "./.env",
@@ -33,6 +35,7 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use("/api/users", userRoutes);
 app.use("/api/merchants", merchantRouter);
+app.get("/api/getStripePublicKey", (req,res)=>{res.status(200).json(new ApiResponse(200,{key : StripePublicKey}))})
 
 app.get("/", (req: Request, res: Response) => {
   res.status(200).send("Welcome To Vervoer");

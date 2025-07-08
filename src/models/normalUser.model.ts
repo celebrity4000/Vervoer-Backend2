@@ -14,6 +14,7 @@ export interface IUser extends Document {
   otp?: string;
   otpExpiry?: Date;
   isVerified: boolean;
+  stripeCustomerId? : string
   carLicensePlateImage?: string;
    bankDetails?: {
     accountNumber?: string;

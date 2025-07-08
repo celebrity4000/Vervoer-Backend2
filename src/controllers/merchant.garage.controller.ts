@@ -8,7 +8,8 @@ import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
 import { generateParkingSpaceID } from "../utils/lotProcessData.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
-import { IUser } from "../models/normalUser.model.js";
+import { IUser, User } from "../models/normalUser.model.js";
+import { createStripeCustomer, initPayment, verifyStripePayment } from "../utils/stripePayments.js";
 
 // Zod schemas for validation
 const GarageData = z.object({
@@ -50,6 +51,33 @@ const GarageData = z.object({
 
 });
 
+const CheckoutData = z.object({
+  garageId: z.string(),
+  bookedSlot: z.object({
+    zone : z.string().regex(/^[A-Z]{1,3}$/),
+    slot : z.coerce.number().max(1000).min(1)
+  }),
+  bookingPeriod: z.object({
+    from: z.iso.datetime(),
+    to: z.iso.datetime()
+  }),
+  couponCode: z.string().optional(),
+  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL" ]).optional(),
+  vehicleNumber: z.string().min(5).optional()
+}).refine((data) => data.bookingPeriod.from < data.bookingPeriod.to, {
+  message: "Booking period is invalid",
+  path: ["bookingPeriod"],
+});
+
+
+const BookingData = z.object({
+  transactionId: z.string().optional(),
+  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]).optional(),
+  bookingId : z.string(),
+})
+/**
+ * Register a new garage
+ */
 export const registerGarage = asyncHandler(
   async (req: Request, res: Response) => {
     try {
@@ -98,6 +126,7 @@ export const registerGarage = asyncHandler(
         console.log(err.issues);
         throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
       }
+      console.log(err) ;
       throw err;
     }
   }
@@ -241,6 +270,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     if (verifiedAuth?.userType !== "user" || !verifiedAuth?.user) {
       throw new ApiError(401, 'UNAUTHORIZED');
     }
+
     console.log("Validation Succesfull request user is", verifiedAuth.user._id )
     console.log("Validating req data")
     const rData = CheckoutData.parse(req.body);
@@ -305,7 +335,13 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         };
       }
     }
+    let stripeCustomerId = verifiedAuth.user.stripeCustomerId ;
+    if(!stripeCustomerId){
+      stripeCustomerId = await createStripeCustomer(verifiedAuth.user.firstName +verifiedAuth.user.lastName , verifiedAuth.user.email);
+      User.findByIdAndUpdate(verifiedAuth.user._id ,{stripeCustomerId}) ;
+    }
 
+    const stripeDetals = await initPayment(totalAmount, stripeCustomerId) ;
     // Update booking with payment and checkout details
     const booking = await GarageBooking.create({
       garageId: rData.garageId,
@@ -316,19 +352,20 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       totalAmount : totalAmount +discount ,
       discount : discount ,
       amountToPaid:  totalAmount,
-      payment: {
+      paymentDetails: {
         amount: totalAmount,
         method: rData.paymentMethod,
         status: 'PENDING',
         transactionId: null,
         paidAt: null,
+        StripePaymentDetails : {...stripeDetals, customerId: stripeCustomerId}
       },
       coupon: couponApplied ? rData.couponCode : undefined ,
     })
 
     // In a real application, you would integrate with a payment gateway here
     // and process the payment
-
+    console.log(booking) ;
     const response = {
       bookingId: booking._id,
       garageName: garage.garageName,
@@ -342,10 +379,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         couponDetails: couponApplied ? couponDetails : null,
         totalAmount: totalAmount
       },
-      payment: {
-        method: rData.paymentMethod,
-        status: 'PENDING'
-      }
+      stripeDetails : booking.paymentDetails.StripePaymentDetails ,
     };
 
     res.status(200).json(new ApiResponse(200, response));
@@ -353,7 +387,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     if (err instanceof z.ZodError) {
       throw new ApiError(400, 'VALIDATION_ERROR', err.issues);
     }
-
+    console.log(err) ;
     throw err;
   }
 });
@@ -393,8 +427,8 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     session.startTransaction();
 
     // Check for overlapping bookings
-    const bookingFrom = new Date (booking.bookingPeriod.from.toISOString()) ;
-    const bookingTo = new Date(booking.bookingPeriod.to.toISOString() );
+    const bookingFrom = new Date (booking.bookingPeriod.from) ;
+    const bookingTo = new Date(booking.bookingPeriod.to);
     const existingBookings = await GarageBooking.countDocuments({
       garageId: booking.garageId,
       bookedSlot: booking.bookedSlot, 
@@ -415,19 +449,17 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     if(existingBookings ){
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
-
-    if(!ValidateTranscation(rData.transactionId)) throw new ApiError(400, "INVALID_TRANSACTION_ID");
-
-    const updateBooking = await GarageBooking.findByIdAndUpdate(rData.bookingId,{
-      paymentDetails : {
-        status : "SUCCESS" ,
-        transactionId : rData.transactionId ,
-        paidAt : new Date()
-      }
-    }).exec() ;
+    console.log(booking) ;
+    if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
+      throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
+    }
+    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId) ;
+    if(!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION")
+    booking.paymentDetails.status = "SUCCESS" ;
+    booking.save() ;
     await session.commitTransaction();
     
-    res.status(201).json(new ApiResponse(201, { booking: updateBooking }));
+    res.status(201).json(new ApiResponse(201, { booking: booking }));
   } catch (err) {
     if (session) {
       await session.abortTransaction();
@@ -436,6 +468,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       console.log(err.issues) ;
       throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
     }
+    console.log(err)
     throw err;
   } finally {
     if (session) {
@@ -443,9 +476,6 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     }
   }
 });
-function ValidateTranscation(transId : string):boolean{
-  return true;
-}
 /**
  * Get garage details
  */

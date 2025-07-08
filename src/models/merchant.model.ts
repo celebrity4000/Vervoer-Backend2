@@ -19,6 +19,7 @@ export interface IMerchant extends Document {
   haveParkingLot: boolean;
   haveResidenceParking: boolean;
   bankDetails?: IBankDetails;
+  stripeCustomerId?:string ;
 }
 
 const MerchantSchema = new Schema(
