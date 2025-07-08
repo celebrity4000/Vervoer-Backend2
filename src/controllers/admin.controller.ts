@@ -192,3 +192,12 @@ export const updateAdminBankDetails = asyncHandler(
     });
   }
 );
+
+export const getMerchantById = asyncHandler(async (req, res) => {
+  const merchant = await Merchant.findById(req.params.id);
+  if (!merchant) {
+    throw new ApiError(404, "Merchant not found");
+  }
+
+  res.status(200).json(new ApiResponse(200, { merchant }));
+});

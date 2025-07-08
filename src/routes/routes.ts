@@ -6,7 +6,8 @@ import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../cont
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {registerDriver,} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails} from "../controllers/admin.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById} from "../controllers/admin.controller.js";
+import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 const router = Router();
@@ -70,12 +71,15 @@ router.delete("/admin/delete-user/:userId", isAdmin, deleteUser);
 router.delete("/admin/delete-merchant/:merchantId", isAdmin, deleteMerchant);
 router.post("/admin/logout", isAdmin, logoutAdmin);
 router.put("/admin/update-bank-details", isAdmin, updateAdminBankDetails);
+router.get('/admin/get-merchant/:id', isAdmin, getMerchantById);
+
 
 // Payment gateway route
 router.post("/create-payment", authenticate, createPayment);
 
 router.post("/social-register", socialRegister);
 
-
+// query route
+router.post("/submit-query", authenticate, submitQueryToAdmin);
 export default router;
 

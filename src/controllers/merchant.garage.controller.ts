@@ -15,89 +15,79 @@ const GarageData = z.object({
   garageName: z.string().min(1, "Garage name is required"),
   about: z.string().min(1, "About is required"),
   address: z.string().min(1, "Address is required"),
-  price: z.coerce.number(),
   location: z.object({
     type: z.literal("Point"),
-    coordinates: z.tuple([z.coerce.number().gte(-180).lte(180), z.coerce.number().gte(-90).lte(90)])
+    coordinates: z.tuple([
+      z.coerce.number().gte(-180).lte(180),
+      z.coerce.number().gte(-90).lte(90)
+    ])
   }).optional(),
-  images : z.array(z.url()).optional(),
+  images: z.array(z.string().url()).optional(),
   contactNumber: z.string().min(9, "Contact number is required"),
-  email: z.email().optional(),
-  generalAvailable: z.array(z.object({
-    day: z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]),
-    isOpen: z.coerce.boolean().default(true),
-    openTime: z.string().optional(),
-    closeTime: z.string().optional(),
-    is24Hours: z.coerce.boolean().default(false)
-  })),
+  email: z.string().email().optional(),
+  generalAvailable: z.array(
+    z.object({
+      day: z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]),
+      isOpen: z.coerce.boolean().default(true),
+      openTime: z.string().optional(),
+      closeTime: z.string().optional(),
+      is24Hours: z.coerce.boolean().default(false),
+    })
+  ),
   is24x7: z.coerce.boolean().default(false),
   emergencyContact: z.object({
-    phone: z.string(),
-    available: z.coerce.boolean()
+    person: z.string(),
+    number: z.string()
   }).optional(),
-  spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number().min(1).max(1000))
+  vehicleType: z.enum(["bike", "car", "both"]).default("both"),
+  spacesList: z.record(
+    z.string().regex(/^[A-Z]{1,3}$/), 
+    z.object({
+      count: z.number().min(1),
+      price: z.number().min(0),
+    })
+  ).optional(),
+
 });
 
-const CheckoutData = z.object({
-  garageId: z.string(),
-  bookedSlot: z.object({
-    zone : z.string().regex(/^[A-Z]{1,3}$/),
-    slot : z.coerce.number().max(1000).min(1)
-  }),
-  bookingPeriod: z.object({
-    from: z.iso.datetime(),
-    to: z.iso.datetime()
-  }),
-  couponCode: z.string().optional(),
-  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL" ]).optional(),
-  vehicleNumber: z.string().min(5).optional()
-}).refine((data) => data.bookingPeriod.from < data.bookingPeriod.to, {
-  message: "Booking period is invalid",
-  path: ["bookingPeriod"],
-});
-
-
-const BookingData = z.object({
-  transactionId: z.string(),
-  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]),
-  bookingId : z.string(),
-})
-/**
- * Register a new garage
- */
 export const registerGarage = asyncHandler(
   async (req: Request, res: Response) => {
     try {
       const rData = GarageData.parse(req.body);
       const verifiedAuth = await verifyAuthentication(req);
-      
+
       if (verifiedAuth?.userType !== "merchant") {
         throw new ApiError(400, "INVALID_USER");
       }
-      
+
       const owner = verifiedAuth.user;
-      
+
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
-      let imageURL:string[] = [] ;
-      if(req.files){
-        if(Array.isArray(req.files))
-            imageURL = await Promise.all(req.files.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
-        else imageURL = await Promise.all(req.files.images.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
+
+      let imageURL: string[] = [];
+
+      if (req.files) {
+        if (Array.isArray(req.files)) {
+          imageURL = await Promise.all(
+            req.files.map((file) => uploadToCloudinary(file.buffer))
+          ).then((e) => e.map((e) => e.secure_url));
+        } else if (req.files.images) {
+          imageURL = await Promise.all(
+            req.files.images.map((file: any) =>
+              uploadToCloudinary(file.buffer)
+            )
+          ).then((e) => e.map((e) => e.secure_url));
+        }
       }
 
       const newGarage = await Garage.create({
         owner: owner._id,
-        images: imageURL ,
+        images: imageURL,
         ...rData
       });
 
-      // Update merchant's haveGarage status
       await mongoose.model("Merchant").findByIdAndUpdate(owner._id, {
         haveGarage: true
       });
@@ -105,7 +95,7 @@ export const registerGarage = asyncHandler(
       res.status(201).json(new ApiResponse(201, { garage: newGarage }));
     } catch (err) {
       if (err instanceof z.ZodError) {
-        console.log(err.issues)
+        console.log(err.issues);
         throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
       }
       throw err;
@@ -113,43 +103,58 @@ export const registerGarage = asyncHandler(
   }
 );
 
+
 /**
  * Edit an existing garage
  */
+
 export const editGarage = asyncHandler(async (req: Request, res: Response) => {
   try {
     const garageId = z.string().parse(req.params.id);
-    const updateData = GarageData.partial().parse(req.body);
-    const verifiedAuth = await verifyAuthentication(req);
 
+    const fieldsToParse = ["spacesList"];
+    fieldsToParse.forEach((field) => {
+      if (req.body[field]) {
+        try {
+          const sanitizedValue = req.body[field].replace(/\r?\n|\r/g, "");
+          req.body[field] = JSON.parse(sanitizedValue);
+        } catch (error) {
+          throw new ApiError(400, `Invalid JSON format for field: ${field}`);
+        }
+      }
+    });
+
+    const updateData = GarageData.partial().parse(req.body);
+
+    const verifiedAuth = await verifyAuthentication(req);
     if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
       throw new ApiError(400, "UNAUTHORIZED");
     }
 
-    // Find the garage and verify ownership
     const garage = await Garage.findById(garageId);
-    if (!garage) {
-      throw new ApiError(404, "GARAGE_NOT_FOUND");
-    }
+    if (!garage) throw new ApiError(404, "GARAGE_NOT_FOUND");
 
-    if (garage.owner.toString() !== verifiedAuth.user._id?.toString()) {
+    if (garage.owner.toString() !== verifiedAuth.user._id.toString()) {
       throw new ApiError(403, "UNAUTHORIZED_ACCESS");
     }
 
-    // Update the garage with new data
-    let imageURL:string[] = [] ;
-      if(req.files){
-        if(Array.isArray(req.files))
-            imageURL = await Promise.all(req.files.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
-        else imageURL = await Promise.all(req.files.images.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
+    let imageURL: string[] = [];
+    if (req.files) {
+      if (Array.isArray(req.files)) {
+        imageURL = await Promise.all(
+          req.files.map((file) => uploadToCloudinary(file.buffer))
+        ).then((results) => results.map((r) => r.secure_url));
+      } else if (req.files.images) {
+        imageURL = await Promise.all(
+          req.files.images.map((file: any) => uploadToCloudinary(file.buffer))
+        ).then((results) => results.map((r) => r.secure_url));
       }
-    if(imageURL.length > 0){
-        updateData.images = [...garage.images, ...imageURL]
     }
+
+    if (imageURL.length > 0) {
+      updateData.images = [...garage.images, ...imageURL];
+    }
+
     const updatedGarage = await Garage.findByIdAndUpdate(
       garageId,
       { $set: updateData },
@@ -163,11 +168,14 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
     res.status(200).json(new ApiResponse(200, { garage: updatedGarage }));
   } catch (err) {
     if (err instanceof z.ZodError) {
+      console.log("Validation Issues:", err.issues);
       throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
     }
     throw err;
   }
 });
+
+
 
 /**
  * Get available slots for a garage
