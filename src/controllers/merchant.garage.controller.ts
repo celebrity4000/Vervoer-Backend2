@@ -16,6 +16,7 @@ const GarageData = z.object({
   garageName: z.string().min(1, "Garage name is required"),
   about: z.string().min(1, "About is required"),
   address: z.string().min(1, "Address is required"),
+  price : z.coerce.number().optional() ,
   location: z.object({
     type: z.literal("Point"),
     coordinates: z.tuple([
@@ -213,6 +214,7 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
     // Get all bookings that overlap with the requested time period
     const bookings = await GarageBooking.find({
       garageId,
+      "paymentDetails.status" : {$ne : "PENDING"},
       $or: [
         {
           'bookingPeriod.from': { $lte: new Date(endDate) },

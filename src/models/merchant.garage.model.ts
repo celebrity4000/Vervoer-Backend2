@@ -8,6 +8,7 @@ export interface IGarage {
   about: string;
   address: string;
   location: { type: "Point"; coordinates: [number, number] };
+  price : number , // average price
   contactNumber: string;
   email?: string;
   generalAvailable: [
