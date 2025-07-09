@@ -282,10 +282,10 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     }
     console.log("Verifying garage is", garage)
     // Check if the slot exists in availableSlots
-    const maxSlots = garage?.spacesList?.get(rData.bookedSlot.zone) || 0;
+    const selectedZone = garage?.spacesList?.get(rData.bookedSlot.zone);
     console.log("Verifying slot id", rData.bookedSlot.slot)
-    console.log("Maximum Slot: ",maxSlots)
-    if (maxSlots <= 0 || rData.bookedSlot.slot > maxSlots) {
+    console.log("Maximum Slot: ",selectedZone)
+    if (!selectedZone || rData.bookedSlot.slot > selectedZone.count) {
       throw new ApiError(400, "INVALID_SLOT");
     }
     // check Availability
@@ -316,7 +316,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate = new Date(rData.bookingPeriod.to);
     const totalHours = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
-    let totalAmount = totalHours * (garage.price || 0), discount = 0  ,couponApplied = false , couponDetails = null ;
+    let totalAmount = totalHours * (selectedZone.price|| 0), discount = 0  ,couponApplied = false , couponDetails = null ;
     if (rData.couponCode) {
       // In a real application, you would validate the coupon here
       // This is a simplified example
@@ -373,7 +373,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
       pricing: {
-        basePrice: totalHours * (garage.price || 0),
+        basePrice: totalHours * (selectedZone.price || 0),
         discount: discount,
         couponApplied: couponApplied,
         couponDetails: couponApplied ? couponDetails : null,
