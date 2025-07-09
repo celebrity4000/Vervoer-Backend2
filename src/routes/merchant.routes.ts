@@ -4,7 +4,7 @@ import {bookASlot, deleteParking, editParkingLot,
     registerParkingLot} from "../controllers/merchant.parkinglot.controller.js"
 import { imageUpload } from "../middleware/upload.middleware.js";
 import { bookGarageSlot, checkoutGarageSlot, deleteGarage, 
-    editGarage, getAvailableGarageSlots, getGarageDetails, 
+    editGarage, garageBookingInfo, garageBookingList, getAvailableGarageSlots, getBookingInfo, getGarageDetails, 
     getListOfGarage, registerGarage } from "../controllers/merchant.garage.controller.js";
 import { addResidence, deleteResidence, getListOfResidence, getResidenceById, updateResidence } from "../controllers/merchant.residence.controller.js";
 import {imageUploadFields} from "../middleware/upload.middleware.js";
@@ -27,6 +27,8 @@ merchantRouter.post("/garage/book",imageUploadFields, bookGarageSlot) ;
 merchantRouter.get("/garage/search", getListOfGarage) ;
 merchantRouter.get("/garage/:id", getGarageDetails) ;
 merchantRouter.post("/garage/checkout",checkoutGarageSlot) ;
+merchantRouter.get("/garage/booking", garageBookingList);
+merchantRouter.get("/garage/booking/:id", garageBookingInfo);
 
 merchantRouter.post("/residence/registration", imageUpload.array("images",10), addResidence);
 merchantRouter.put("/residence/update/:id",imageUpload.array("images",10),updateResidence);

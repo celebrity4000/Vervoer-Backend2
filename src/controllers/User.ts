@@ -13,6 +13,8 @@ import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import axios from "axios";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { BlacklistedToken } from "../models/blacklistedToken.model.js";
+import { BankDetailsSchema } from "../models/bankDetails.model.js";
+// import 
 import mongoose from "mongoose";
 
 export const registerUser = async (
@@ -426,3 +428,35 @@ export const resetForgottenPassword = async (req: Request, res: Response, next: 
     next(error);
   }
 };
+
+
+// bank details
+const bankDetailsSchema = z.object({
+  accountNumber: z.string().min(6),
+  ifscCode: z.string().min(4),
+  accountHolderName: z.string(),
+  branch: z.string(),
+});
+export const updateBankDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    const userInfo = await verifyAuthentication(req);
+
+    const { accountNumber, ifscCode, accountHolderName, branch } =
+      bankDetailsSchema.parse(req.body);
+
+    userInfo.user.bankDetails = {
+      accountNumber,
+      ifscCode,
+      accountHolderName,
+      branch,
+    };
+
+    await userInfo.user.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Bank details updated successfully",
+      bankDetails: userInfo.user.bankDetails,
+    });
+  }
+);

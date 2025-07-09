@@ -11,10 +11,19 @@ export const UserBaseSchemaFields = {
   otp: { type: String },
   otpExpiry: { type: Date },
   isVerified: { type: Boolean, default: false },
+  stripeCustomerId : String ,
   loginType: {
     type: String,
     enum: ["normal", "google", "facebook"],
     default: "normal"
   },
   socialId: { type: String },
-};
+    queries: [
+    {
+      subject: { type: String, required: true },
+      message: { type: String, required: true },
+      status: { type: String, enum: ["pending", "resolved"], default: "pending" },
+      createdAt: { type: Date, default: Date.now },
+    }
+  ]
+}

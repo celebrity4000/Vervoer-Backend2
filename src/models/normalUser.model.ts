@@ -1,5 +1,6 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
+import { BankDetailsSchema } from "./bankDetails.model.js";
 
 export interface IUser extends Document {
   phoneNumber: string;
@@ -13,13 +14,22 @@ export interface IUser extends Document {
   otp?: string;
   otpExpiry?: Date;
   isVerified: boolean;
+  stripeCustomerId? : string
   carLicensePlateImage?: string;
+   bankDetails?: {
+    accountNumber?: string;
+    ifscCode?: string;
+    accountHolderName?: string;
+    branch?: string;
+  };
+  
 }
 
 const UserSchema = new Schema(
   {
     ...UserBaseSchemaFields,
     carLicensePlateImage: { type: String,},
+    bankDetails: BankDetailsSchema,
   },
   { timestamps: true }
 );

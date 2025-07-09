@@ -8,34 +8,47 @@ import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
 import { generateParkingSpaceID } from "../utils/lotProcessData.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
-import { IUser } from "../models/normalUser.model.js";
+import { IUser, User } from "../models/normalUser.model.js";
+import { createStripeCustomer, initPayment, verifyStripePayment } from "../utils/stripePayments.js";
 
 // Zod schemas for validation
 const GarageData = z.object({
   garageName: z.string().min(1, "Garage name is required"),
   about: z.string().min(1, "About is required"),
   address: z.string().min(1, "Address is required"),
-  price: z.coerce.number(),
   location: z.object({
     type: z.literal("Point"),
-    coordinates: z.tuple([z.coerce.number().gte(-180).lte(180), z.coerce.number().gte(-90).lte(90)])
+    coordinates: z.tuple([
+      z.coerce.number().gte(-180).lte(180),
+      z.coerce.number().gte(-90).lte(90)
+    ])
   }).optional(),
-  images : z.array(z.url()).optional(),
+  images: z.array(z.string().url()).optional(),
   contactNumber: z.string().min(9, "Contact number is required"),
-  email: z.email().optional(),
-  generalAvailable: z.array(z.object({
-    day: z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]),
-    isOpen: z.coerce.boolean().default(true),
-    openTime: z.string().optional(),
-    closeTime: z.string().optional(),
-    is24Hours: z.coerce.boolean().default(false)
-  })),
+  email: z.string().email().optional(),
+  generalAvailable: z.array(
+    z.object({
+      day: z.enum(["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"]),
+      isOpen: z.coerce.boolean().default(true),
+      openTime: z.string().optional(),
+      closeTime: z.string().optional(),
+      is24Hours: z.coerce.boolean().default(false),
+    })
+  ),
   is24x7: z.coerce.boolean().default(false),
   emergencyContact: z.object({
-    phone: z.string(),
-    available: z.coerce.boolean()
+    person: z.string(),
+    number: z.string()
   }).optional(),
-  spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number().min(1).max(1000))
+  vehicleType: z.enum(["bike", "car", "both"]).default("both"),
+  spacesList: z.record(
+    z.string().regex(/^[A-Z]{1,3}$/), 
+    z.object({
+      count: z.number().min(1),
+      price: z.number().min(0),
+    })
+  ).optional(),
+
 });
 
 const CheckoutData = z.object({
@@ -58,8 +71,8 @@ const CheckoutData = z.object({
 
 
 const BookingData = z.object({
-  transactionId: z.string(),
-  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]),
+  transactionId: z.string().optional(),
+  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"]).optional(),
   bookingId : z.string(),
 })
 /**
@@ -70,34 +83,39 @@ export const registerGarage = asyncHandler(
     try {
       const rData = GarageData.parse(req.body);
       const verifiedAuth = await verifyAuthentication(req);
-      
+
       if (verifiedAuth?.userType !== "merchant") {
         throw new ApiError(400, "INVALID_USER");
       }
-      
+
       const owner = verifiedAuth.user;
-      
+
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
-      let imageURL:string[] = [] ;
-      if(req.files){
-        if(Array.isArray(req.files))
-            imageURL = await Promise.all(req.files.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
-        else imageURL = await Promise.all(req.files.images.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
+
+      let imageURL: string[] = [];
+
+      if (req.files) {
+        if (Array.isArray(req.files)) {
+          imageURL = await Promise.all(
+            req.files.map((file) => uploadToCloudinary(file.buffer))
+          ).then((e) => e.map((e) => e.secure_url));
+        } else if (req.files.images) {
+          imageURL = await Promise.all(
+            req.files.images.map((file: any) =>
+              uploadToCloudinary(file.buffer)
+            )
+          ).then((e) => e.map((e) => e.secure_url));
+        }
       }
 
       const newGarage = await Garage.create({
         owner: owner._id,
-        images: imageURL ,
+        images: imageURL,
         ...rData
       });
 
-      // Update merchant's haveGarage status
       await mongoose.model("Merchant").findByIdAndUpdate(owner._id, {
         haveGarage: true
       });
@@ -105,51 +123,67 @@ export const registerGarage = asyncHandler(
       res.status(201).json(new ApiResponse(201, { garage: newGarage }));
     } catch (err) {
       if (err instanceof z.ZodError) {
-        console.log(err.issues)
+        console.log(err.issues);
         throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
       }
+      console.log(err) ;
       throw err;
     }
   }
 );
 
+
 /**
  * Edit an existing garage
  */
+
 export const editGarage = asyncHandler(async (req: Request, res: Response) => {
   try {
     const garageId = z.string().parse(req.params.id);
-    const updateData = GarageData.partial().parse(req.body);
-    const verifiedAuth = await verifyAuthentication(req);
 
+    const fieldsToParse = ["spacesList"];
+    fieldsToParse.forEach((field) => {
+      if (req.body[field]) {
+        try {
+          const sanitizedValue = req.body[field].replace(/\r?\n|\r/g, "");
+          req.body[field] = JSON.parse(sanitizedValue);
+        } catch (error) {
+          throw new ApiError(400, `Invalid JSON format for field: ${field}`);
+        }
+      }
+    });
+
+    const updateData = GarageData.partial().parse(req.body);
+
+    const verifiedAuth = await verifyAuthentication(req);
     if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
       throw new ApiError(400, "UNAUTHORIZED");
     }
 
-    // Find the garage and verify ownership
     const garage = await Garage.findById(garageId);
-    if (!garage) {
-      throw new ApiError(404, "GARAGE_NOT_FOUND");
-    }
+    if (!garage) throw new ApiError(404, "GARAGE_NOT_FOUND");
 
-    if (garage.owner.toString() !== verifiedAuth.user._id?.toString()) {
+    if (garage.owner.toString() !== verifiedAuth.user._id.toString()) {
       throw new ApiError(403, "UNAUTHORIZED_ACCESS");
     }
 
-    // Update the garage with new data
-    let imageURL:string[] = [] ;
-      if(req.files){
-        if(Array.isArray(req.files))
-            imageURL = await Promise.all(req.files.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
-        else imageURL = await Promise.all(req.files.images.map(
-                (file)=>uploadToCloudinary(file.buffer))
-            ).then(e=>e.map(e=>e.secure_url));
+    let imageURL: string[] = [];
+    if (req.files) {
+      if (Array.isArray(req.files)) {
+        imageURL = await Promise.all(
+          req.files.map((file) => uploadToCloudinary(file.buffer))
+        ).then((results) => results.map((r) => r.secure_url));
+      } else if (req.files.images) {
+        imageURL = await Promise.all(
+          req.files.images.map((file: any) => uploadToCloudinary(file.buffer))
+        ).then((results) => results.map((r) => r.secure_url));
       }
-    if(imageURL.length > 0){
-        updateData.images = [...garage.images, ...imageURL]
     }
+
+    if (imageURL.length > 0) {
+      updateData.images = [...garage.images, ...imageURL];
+    }
+
     const updatedGarage = await Garage.findByIdAndUpdate(
       garageId,
       { $set: updateData },
@@ -163,11 +197,14 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
     res.status(200).json(new ApiResponse(200, { garage: updatedGarage }));
   } catch (err) {
     if (err instanceof z.ZodError) {
+      console.log("Validation Issues:", err.issues);
       throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
     }
     throw err;
   }
 });
+
+
 
 /**
  * Get available slots for a garage
@@ -233,6 +270,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     if (verifiedAuth?.userType !== "user" || !verifiedAuth?.user) {
       throw new ApiError(401, 'UNAUTHORIZED');
     }
+
     console.log("Validation Succesfull request user is", verifiedAuth.user._id )
     console.log("Validating req data")
     const rData = CheckoutData.parse(req.body);
@@ -244,10 +282,10 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     }
     console.log("Verifying garage is", garage)
     // Check if the slot exists in availableSlots
-    const maxSlots = garage?.spacesList?.get(rData.bookedSlot.zone) || 0;
+    const selectedZone = garage?.spacesList?.get(rData.bookedSlot.zone);
     console.log("Verifying slot id", rData.bookedSlot.slot)
-    console.log("Maximum Slot: ",maxSlots)
-    if (maxSlots <= 0 || rData.bookedSlot.slot > maxSlots) {
+    console.log("Maximum Slot: ",selectedZone)
+    if (!selectedZone || rData.bookedSlot.slot > selectedZone.count) {
       throw new ApiError(400, "INVALID_SLOT");
     }
     // check Availability
@@ -278,7 +316,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate = new Date(rData.bookingPeriod.to);
     const totalHours = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
-    let totalAmount = totalHours * (garage.price || 0), discount = 0  ,couponApplied = false , couponDetails = null ;
+    let totalAmount = totalHours * (selectedZone.price|| 0), discount = 0  ,couponApplied = false , couponDetails = null ;
     if (rData.couponCode) {
       // In a real application, you would validate the coupon here
       // This is a simplified example
@@ -297,7 +335,13 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         };
       }
     }
+    let stripeCustomerId = verifiedAuth.user.stripeCustomerId ;
+    if(!stripeCustomerId){
+      stripeCustomerId = await createStripeCustomer(verifiedAuth.user.firstName +verifiedAuth.user.lastName , verifiedAuth.user.email);
+      User.findByIdAndUpdate(verifiedAuth.user._id ,{stripeCustomerId}) ;
+    }
 
+    const stripeDetals = await initPayment(totalAmount, stripeCustomerId) ;
     // Update booking with payment and checkout details
     const booking = await GarageBooking.create({
       garageId: rData.garageId,
@@ -308,19 +352,20 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       totalAmount : totalAmount +discount ,
       discount : discount ,
       amountToPaid:  totalAmount,
-      payment: {
+      paymentDetails: {
         amount: totalAmount,
         method: rData.paymentMethod,
         status: 'PENDING',
         transactionId: null,
         paidAt: null,
+        StripePaymentDetails : {...stripeDetals, customerId: stripeCustomerId}
       },
       coupon: couponApplied ? rData.couponCode : undefined ,
     })
 
     // In a real application, you would integrate with a payment gateway here
     // and process the payment
-
+    console.log(booking) ;
     const response = {
       bookingId: booking._id,
       garageName: garage.garageName,
@@ -328,16 +373,13 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
       pricing: {
-        basePrice: totalHours * (garage.price || 0),
+        basePrice: totalHours * (selectedZone.price || 0),
         discount: discount,
         couponApplied: couponApplied,
         couponDetails: couponApplied ? couponDetails : null,
         totalAmount: totalAmount
       },
-      payment: {
-        method: rData.paymentMethod,
-        status: 'PENDING'
-      }
+      stripeDetails : booking.paymentDetails.StripePaymentDetails ,
     };
 
     res.status(200).json(new ApiResponse(200, response));
@@ -345,7 +387,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     if (err instanceof z.ZodError) {
       throw new ApiError(400, 'VALIDATION_ERROR', err.issues);
     }
-
+    console.log(err) ;
     throw err;
   }
 });
@@ -385,8 +427,8 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     session.startTransaction();
 
     // Check for overlapping bookings
-    const bookingFrom = new Date (booking.bookingPeriod.from.toISOString()) ;
-    const bookingTo = new Date(booking.bookingPeriod.to.toISOString() );
+    const bookingFrom = new Date (booking.bookingPeriod.from) ;
+    const bookingTo = new Date(booking.bookingPeriod.to);
     const existingBookings = await GarageBooking.countDocuments({
       garageId: booking.garageId,
       bookedSlot: booking.bookedSlot, 
@@ -405,21 +447,23 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       ]
     }).session(session);
     if(existingBookings ){
+      booking.paymentDetails.status = "FAILED" ;
+      await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
-
-    if(!ValidateTranscation(rData.transactionId)) throw new ApiError(400, "INVALID_TRANSACTION_ID");
-
-    const updateBooking = await GarageBooking.findByIdAndUpdate(rData.bookingId,{
-      paymentDetails : {
-        status : "SUCCESS" ,
-        transactionId : rData.transactionId ,
-        paidAt : new Date()
-      }
-    }).exec() ;
+    console.log(booking) ;
+    if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
+      booking.paymentDetails.status = "FAILED" ;
+      await booking.save();
+      throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
+    }
+    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId) ;
+    if(!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION")
+    booking.paymentDetails.status = "SUCCESS" ;
+    booking.save() ;
     await session.commitTransaction();
     
-    res.status(201).json(new ApiResponse(201, { booking: updateBooking }));
+    res.status(201).json(new ApiResponse(201, { booking: booking }));
   } catch (err) {
     if (session) {
       await session.abortTransaction();
@@ -428,6 +472,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       console.log(err.issues) ;
       throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
     }
+    console.log(err)
     throw err;
   } finally {
     if (session) {
@@ -435,9 +480,6 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     }
   }
 });
-function ValidateTranscation(transId : string):boolean{
-  return true;
-}
 /**
  * Get garage details
  */
@@ -516,3 +558,196 @@ export const getListOfGarage = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Server Error", error);
   }
 });
+
+
+/**
+ * @description Get booking information for a specific garage booking
+ * @route GET /api/merchants/garage/booking/:bookingId
+ * @access Private - Only accessible by the user who made the booking or the garage owner
+ */
+export const garageBookingInfo = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+    
+    // Find the booking and populate related data
+    const booking = await GarageBooking.findById(bookingId)
+      .populate('garageId', 'garageName address contactNumber')
+      .populate('customerId', 'firstName lastName email phoneNumber')
+      .lean();
+
+    if (!booking) {
+      throw new ApiError(404, 'BOOKING_NOT_FOUND');
+    }
+    const isCustomer = booking.customerId._id.toString() === verifiedAuth.user._id.toString();
+    
+    let isGarageOwner = false;
+    if (!isCustomer) {
+      const garage = await Garage.findById(booking.garageId);
+      isGarageOwner = garage?.owner.toString() === verifiedAuth.user._id.toString();
+    }
+
+    // If neither the customer nor the garage owner, deny access
+    if (!isCustomer && !isGarageOwner) {
+      throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
+    }
+
+    // Format the response
+    const response = {
+      _id: booking._id,
+      garage: {
+        _id: booking.garageId._id,
+        name: booking.garageId.garageName,
+        address: booking.garageId.address,
+        contactNumber: booking.garageId.contactNumber
+      },
+      customer: {
+        _id: booking.customerId._id,
+        name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
+        email: booking.customerId.email,
+        phone: booking.customerId.phoneNumber
+      },
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      bookedSlot: booking.bookedSlot,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.method
+      },
+      createdAt: booking.createdAt
+    };
+
+    res.status(200).json(new ApiResponse(200, response));
+  } catch (error) {
+    console.log(error);
+    throw error;
+  }
+})
+
+/**
+ * @description Get a paginated list of garage bookings
+ * @route GET /api/merchants/garage/bookings
+ * @queryParam page - Page number (default: 1)
+ * @queryParam size - Number of items per page (default: 10)
+ * @queryParam garageId - Optional garage ID (for merchants to filter by garage)
+ * @access Private - Accessible by authenticated users (sees their own bookings) or merchants (sees their garage's bookings)
+ */
+const BookingQueryParams = z.object({
+  page : z.coerce.number().min(1).default(1),
+  limit : z.coerce.number().min(1).default(10),
+  garageId : z.string().optional()
+})
+export const garageBookingList = asyncHandler(async (req, res) => {
+  try {
+    // Parse query parameters with defaults
+    const {page , limit , garageId} = BookingQueryParams.parse(req.query);
+    const skip = (page - 1) * limit;
+
+    // Verify authentication
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+
+    // Build the base query
+    const query: any = {};
+    
+    if (verifiedAuth.userType === 'user') {
+      // For regular users, only show their own bookings
+      query.customerId = verifiedAuth.user._id;
+    } else if (verifiedAuth.userType === 'merchant') {
+      // For merchants, show bookings for their garages
+      if (garageId) {
+        // Verify the garage belongs to the merchant
+        const garage = await Garage.findOne({ _id: garageId, owner: verifiedAuth.user._id });
+        if (!garage) {
+          throw new ApiError(404, 'GARAGE_NOT_FOUND_OR_ACCESS_DENIED');
+        }
+        query.garageId = garageId;
+      } else {
+        // If no garageId provided, get all garages owned by the merchant
+        const merchantGarages = await Garage.find({ owner: verifiedAuth.user._id }, '_id');
+        const garageIds = merchantGarages.map(g => g._id);
+        if (garageIds.length === 0) {
+          // No garages found for this merchant
+          res.status(200).json(new ApiResponse(200, {
+            bookings: [],
+            pagination: {
+              total: 0,
+              page,
+              totalPages: 0,
+              size: limit
+            }
+          }));
+          return ;
+        }
+        query.garageId = { $in: garageIds };
+      }
+    } else {
+      throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
+    }
+
+    // Get total count for pagination
+    const total = await GarageBooking.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    // Get paginated bookings with related data
+    const bookings = await GarageBooking.find({$and :[query , {"paymentDetails.status" : {$ne : "PENDING"}}]})
+      .populate('garageId', 'garageName address contactNumber')
+      .populate('customerId', 'firstName lastName email phoneNumber')
+      .sort({ createdAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Format the response
+    const formattedBookings = bookings.map(booking => ({
+      _id: booking._id,
+      garage: {
+        _id: booking.garageId._id,
+        name: booking.garageId.garageName,
+        address: booking.garageId.address,
+        contactNumber: booking.garageId.contactNumber
+      },
+      customer: {
+        _id: booking.customerId._id,
+        name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
+        email: booking.customerId.email,
+        phone: booking.customerId.phoneNumber
+      },
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      bookedSlot: booking.bookedSlot,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.method
+      },
+      status: booking.paymentDetails.status,
+      createdAt: booking.createdAt
+    }));
+
+    res.status(200).json(new ApiResponse(200, {
+      bookings: formattedBookings,
+      pagination: {
+        total,
+        page,
+        totalPages,
+        size: limit
+      }
+    }));
+
+  } catch (error) {
+    console.error('Error in bookingList:', error);
+    throw error;
+  }
+});
+

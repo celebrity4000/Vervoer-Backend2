@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response , NextFunction} from "express";
 import { ApiError } from "../utils/apierror.js";
 import { ApiResponse } from "../utils/apirespone.js";
 import jwt from "jsonwebtoken";
@@ -6,6 +6,9 @@ import { User } from "../models/normalUser.model.js";
 import { Merchant } from "../models/merchant.model.js";
 import { sendEmail,generateOTP,getOtpExpiry } from "../utils/mailer.utils.js";
 import { BlacklistedToken } from "../models/blacklistedToken.model.js";
+import { asyncHandler } from "../utils/asynchandler.js";
+import { Admin } from "../models/adminBank.model.js";
+import { z } from "zod";
 
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
@@ -137,3 +140,64 @@ export const logoutAdmin = async (req: Request, res: Response) => {
     new ApiResponse(200, {}, "Admin logged out successfully")
   );
 };
+
+
+// bank details
+const bankDetailsSchema = z.object({
+  accountNumber: z.string().min(8, "Account Number is too short"),
+  ifscCode: z.string().min(5, "IFSC code is too short"),
+  accountHolderName: z.string().min(3, "Account Holder Name is required"),
+  branch: z.string().min(2, "Branch is required"),
+});
+
+export const updateAdminBankDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email } = req.body;
+
+    if (email !== process.env.ADMIN_EMAIL) {
+      throw new ApiError(401, "Invalid admin email");
+    }
+
+    const { accountNumber, ifscCode, accountHolderName, branch } =
+      bankDetailsSchema.parse(req.body);
+
+    let admin = await Admin.findOne({ email });
+
+    if (!admin) {
+      // If admin document doesn't exist, create one
+      admin = await Admin.create({
+        email,
+        bankDetails: {
+          accountNumber,
+          ifscCode,
+          accountHolderName,
+          branch,
+        },
+      });
+    } else {
+      // Update existing bank details
+      admin.bankDetails = {
+        accountNumber,
+        ifscCode,
+        accountHolderName,
+        branch,
+      };
+      await admin.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Admin bank details updated successfully",
+      bankDetails: admin.bankDetails,
+    });
+  }
+);
+
+export const getMerchantById = asyncHandler(async (req, res) => {
+  const merchant = await Merchant.findById(req.params.id);
+  if (!merchant) {
+    throw new ApiError(404, "Merchant not found");
+  }
+
+  res.status(200).json(new ApiResponse(200, { merchant }));
+});

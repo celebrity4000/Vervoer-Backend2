@@ -16,6 +16,7 @@ console.log({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 })
 export const deleteFromCloudinary = async function (public_id:string) {
+
   return new Promise<void>((res , rej) =>
   cloudinary.uploader.destroy(public_id,{resource_type: "image"},(err)=>{
     if(err)rej(err) ;
@@ -38,7 +39,6 @@ const uploadToCloudinary = async (
       }
     );
 
-    // Convert buffer to stream and pipe it into Cloudinary
     Readable.from(buffer).pipe(uploadStream);
   });
 };
