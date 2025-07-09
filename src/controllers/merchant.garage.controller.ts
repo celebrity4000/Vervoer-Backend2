@@ -342,6 +342,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       totalAmount : totalAmount +discount ,
       discount : discount ,
       amountToPaid:  totalAmount,
+      priceRate : selectedZone.price ,
       paymentDetails: {
         amount: totalAmount,
         method: rData.paymentMethod,
@@ -363,6 +364,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
       pricing: {
+        priceRate : selectedZone.price ,
         basePrice: totalHours * (selectedZone.price || 0),
         discount: discount,
         couponApplied: couponApplied,
@@ -374,10 +376,10 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
 
     res.status(200).json(new ApiResponse(200, response));
   } catch (err) {
+    console.log(err) ;
     if (err instanceof z.ZodError) {
       throw new ApiError(400, 'VALIDATION_ERROR', err.issues);
     }
-    console.log(err) ;
     throw err;
   }
 });
@@ -436,19 +438,21 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
         }
       ]
     }).session(session);
+    console.log(booking) ;
+
+    if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
+      throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
+    }
+
+    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId) ;
+    if(!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION")
+
+    booking.paymentDetails.paidAt = new Date()
     if(existingBookings ){
       booking.paymentDetails.status = "FAILED" ;
       await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
-    console.log(booking) ;
-    if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
-      booking.paymentDetails.status = "FAILED" ;
-      await booking.save();
-      throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
-    }
-    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId) ;
-    if(!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION")
     booking.paymentDetails.status = "SUCCESS" ;
     booking.save() ;
     await session.commitTransaction();
@@ -538,6 +542,7 @@ export const getListOfGarage = asyncHandler(async (req, res) => {
 
     const result = await Garage.find(queries).exec();
     if (result) {
+      console.log(result) ;
       res.status(200).json(new ApiResponse(200, result));
     } else throw new ApiError(500);
   } catch (error) {
@@ -603,12 +608,15 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
       bookedSlot: booking.bookedSlot,
+      priceRate : booking.priceRate ,
       paymentDetails: {
         totalAmount: booking.totalAmount,
         amountPaid: booking.amountToPaid,
         discount: booking.discount,
         status: booking.paymentDetails.status,
-        method: booking.paymentDetails.method
+        method: booking.paymentDetails.method,
+        paidAt : booking.paymentDetails.paidAt
+        
       },
       createdAt: booking.createdAt
     };
@@ -697,6 +705,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
       .lean();
 
     // Format the response
+    console.log(bookings) ;
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
       garage: {
@@ -714,12 +723,14 @@ export const garageBookingList = asyncHandler(async (req, res) => {
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
       bookedSlot: booking.bookedSlot,
+      priceRate : booking.priceRate ,
       paymentDetails: {
         totalAmount: booking.totalAmount,
         amountPaid: booking.amountToPaid,
         discount: booking.discount,
         status: booking.paymentDetails.status,
-        method: booking.paymentDetails.method
+        method: booking.paymentDetails.method ,
+        paidAt : booking.paymentDetails.paidAt ,
       },
       status: booking.paymentDetails.status,
       createdAt: booking.createdAt

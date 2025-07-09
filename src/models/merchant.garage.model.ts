@@ -186,12 +186,14 @@ interface IGarageBooking {
   amountToPaid: number;
   couponCode?: string;
   discount: number;
+  priceRate : number ;
   paymentDetails: {
     transactionId?: string;
     amount: number;
     method: "CASH" | "CREDIT" | "DEBIT" | "STRIPE" | "PAYPAL";
     status: "PENDING" | "SUCCESS" | "FAILED";
     StripePaymentDetails?: StripeIntentData & { customerId: string; };
+    paidAt : string | Date | null ;
   }
 }
 const garageBookingSchema = new mongoose.Schema<IGarageBooking>({
@@ -218,6 +220,7 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>({
   amountToPaid: { type: Number, required: true },
   couponCode: String,
   discount: { type: Number, default: 0 },
+  priceRate : {type: Number , required :true} ,
   paymentDetails: {
     transactionId: String,
     amount: Number,
@@ -228,6 +231,7 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>({
       enum: ["CASE", "STRIPE"],
       default: "STRIPE",
     },
+    paidAt : Date ,
     StripePaymentDetails:{
       paymentIntent   : {type :String , required : true} ,
       ephemeralKey    : String ,
