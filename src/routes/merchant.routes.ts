@@ -25,10 +25,10 @@ merchantRouter.delete("/garage/delete/:id",deleteGarage) ;
 merchantRouter.get("/garage/getavailable",getAvailableGarageSlots) ;
 merchantRouter.post("/garage/book",imageUploadFields, bookGarageSlot) ;
 merchantRouter.get("/garage/search", getListOfGarage) ;
-merchantRouter.get("/garage/:id", getGarageDetails) ;
 merchantRouter.post("/garage/checkout",checkoutGarageSlot) ;
-merchantRouter.get("/garage/booking", garageBookingList);
+merchantRouter.get("/garage/bookinglist", garageBookingList);
 merchantRouter.get("/garage/booking/:id", garageBookingInfo);
+merchantRouter.get("/garage/:id", getGarageDetails) ;
 
 merchantRouter.post("/residence/registration", imageUpload.array("images",10), addResidence);
 merchantRouter.put("/residence/update/:id",imageUpload.array("images",10),updateResidence);

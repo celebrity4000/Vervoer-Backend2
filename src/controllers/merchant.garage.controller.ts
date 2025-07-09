@@ -644,6 +644,7 @@ const BookingQueryParams = z.object({
 export const garageBookingList = asyncHandler(async (req, res) => {
   try {
     // Parse query parameters with defaults
+    console.log("NEW Query Requested")
     const {page , limit , garageId} = BookingQueryParams.parse(req.query);
     const skip = (page - 1) * limit;
 
@@ -694,7 +695,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     // Get total count for pagination
     const total = await GarageBooking.countDocuments(query);
     const totalPages = Math.ceil(total / limit);
-
+    console.log("query at garage: ", query);
     // Get paginated bookings with related data
     const bookings = await GarageBooking.find({$and :[query , {"paymentDetails.status" : {$ne : "PENDING"}}]})
       .populate('garageId', 'garageName address contactNumber')

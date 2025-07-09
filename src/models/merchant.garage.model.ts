@@ -157,8 +157,8 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
     getAllSlots: function() {
       const res = new Set<string>()
       if (this.spacesList) {
-        this.spacesList.forEach((value: number, key: string) => {
-          for (let i = 1; i <= value; i++) {
+        this.spacesList.forEach((value, key: string) => {
+          for (let i = 1; i <= value.count; i++) {
             res.add(generateParkingSpaceID(key, i.toString()));
           }
         })
