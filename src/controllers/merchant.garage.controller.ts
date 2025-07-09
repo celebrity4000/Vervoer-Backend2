@@ -141,18 +141,6 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
   try {
     const garageId = z.string().parse(req.params.id);
 
-    const fieldsToParse = ["spacesList"];
-    fieldsToParse.forEach((field) => {
-      if (req.body[field]) {
-        try {
-          const sanitizedValue = req.body[field].replace(/\r?\n|\r/g, "");
-          req.body[field] = JSON.parse(sanitizedValue);
-        } catch (error) {
-          throw new ApiError(400, `Invalid JSON format for field: ${field}`);
-        }
-      }
-    });
-
     const updateData = GarageData.partial().parse(req.body);
 
     const verifiedAuth = await verifyAuthentication(req);
@@ -221,7 +209,7 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
       throw new ApiError(400, "GARAGE_NOT_FOUND");
     }
     let totalSpace = 0 ;
-    garage.spacesList?.forEach((e)=>{totalSpace+=e})
+    garage.spacesList?.forEach((e)=>{totalSpace+=e.count})
     // Get all bookings that overlap with the requested time period
     const bookings = await GarageBooking.find({
       garageId,
