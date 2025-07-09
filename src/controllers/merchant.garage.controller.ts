@@ -447,10 +447,14 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       ]
     }).session(session);
     if(existingBookings ){
+      booking.paymentDetails.status = "FAILED" ;
+      await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
     console.log(booking) ;
     if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
+      booking.paymentDetails.status = "FAILED" ;
+      await booking.save();
       throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
     }
     const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId) ;
@@ -554,3 +558,196 @@ export const getListOfGarage = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Server Error", error);
   }
 });
+
+
+/**
+ * @description Get booking information for a specific garage booking
+ * @route GET /api/merchants/garage/booking/:bookingId
+ * @access Private - Only accessible by the user who made the booking or the garage owner
+ */
+export const garageBookingInfo = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+    
+    // Find the booking and populate related data
+    const booking = await GarageBooking.findById(bookingId)
+      .populate('garageId', 'garageName address contactNumber')
+      .populate('customerId', 'firstName lastName email phoneNumber')
+      .lean();
+
+    if (!booking) {
+      throw new ApiError(404, 'BOOKING_NOT_FOUND');
+    }
+    const isCustomer = booking.customerId._id.toString() === verifiedAuth.user._id.toString();
+    
+    let isGarageOwner = false;
+    if (!isCustomer) {
+      const garage = await Garage.findById(booking.garageId);
+      isGarageOwner = garage?.owner.toString() === verifiedAuth.user._id.toString();
+    }
+
+    // If neither the customer nor the garage owner, deny access
+    if (!isCustomer && !isGarageOwner) {
+      throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
+    }
+
+    // Format the response
+    const response = {
+      _id: booking._id,
+      garage: {
+        _id: booking.garageId._id,
+        name: booking.garageId.garageName,
+        address: booking.garageId.address,
+        contactNumber: booking.garageId.contactNumber
+      },
+      customer: {
+        _id: booking.customerId._id,
+        name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
+        email: booking.customerId.email,
+        phone: booking.customerId.phoneNumber
+      },
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      bookedSlot: booking.bookedSlot,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.method
+      },
+      createdAt: booking.createdAt
+    };
+
+    res.status(200).json(new ApiResponse(200, response));
+  } catch (error) {
+    console.log(error);
+    throw error;
+  }
+})
+
+/**
+ * @description Get a paginated list of garage bookings
+ * @route GET /api/merchants/garage/bookings
+ * @queryParam page - Page number (default: 1)
+ * @queryParam size - Number of items per page (default: 10)
+ * @queryParam garageId - Optional garage ID (for merchants to filter by garage)
+ * @access Private - Accessible by authenticated users (sees their own bookings) or merchants (sees their garage's bookings)
+ */
+const BookingQueryParams = z.object({
+  page : z.coerce.number().min(1).default(1),
+  limit : z.coerce.number().min(1).default(10),
+  garageId : z.string().optional()
+})
+export const garageBookingList = asyncHandler(async (req, res) => {
+  try {
+    // Parse query parameters with defaults
+    const {page , limit , garageId} = BookingQueryParams.parse(req.query);
+    const skip = (page - 1) * limit;
+
+    // Verify authentication
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+
+    // Build the base query
+    const query: any = {};
+    
+    if (verifiedAuth.userType === 'user') {
+      // For regular users, only show their own bookings
+      query.customerId = verifiedAuth.user._id;
+    } else if (verifiedAuth.userType === 'merchant') {
+      // For merchants, show bookings for their garages
+      if (garageId) {
+        // Verify the garage belongs to the merchant
+        const garage = await Garage.findOne({ _id: garageId, owner: verifiedAuth.user._id });
+        if (!garage) {
+          throw new ApiError(404, 'GARAGE_NOT_FOUND_OR_ACCESS_DENIED');
+        }
+        query.garageId = garageId;
+      } else {
+        // If no garageId provided, get all garages owned by the merchant
+        const merchantGarages = await Garage.find({ owner: verifiedAuth.user._id }, '_id');
+        const garageIds = merchantGarages.map(g => g._id);
+        if (garageIds.length === 0) {
+          // No garages found for this merchant
+          res.status(200).json(new ApiResponse(200, {
+            bookings: [],
+            pagination: {
+              total: 0,
+              page,
+              totalPages: 0,
+              size: limit
+            }
+          }));
+          return ;
+        }
+        query.garageId = { $in: garageIds };
+      }
+    } else {
+      throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
+    }
+
+    // Get total count for pagination
+    const total = await GarageBooking.countDocuments(query);
+    const totalPages = Math.ceil(total / limit);
+
+    // Get paginated bookings with related data
+    const bookings = await GarageBooking.find({$and :[query , {"paymentDetails.status" : {$ne : "PENDING"}}]})
+      .populate('garageId', 'garageName address contactNumber')
+      .populate('customerId', 'firstName lastName email phoneNumber')
+      .sort({ createdAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Format the response
+    const formattedBookings = bookings.map(booking => ({
+      _id: booking._id,
+      garage: {
+        _id: booking.garageId._id,
+        name: booking.garageId.garageName,
+        address: booking.garageId.address,
+        contactNumber: booking.garageId.contactNumber
+      },
+      customer: {
+        _id: booking.customerId._id,
+        name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
+        email: booking.customerId.email,
+        phone: booking.customerId.phoneNumber
+      },
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      bookedSlot: booking.bookedSlot,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.method
+      },
+      status: booking.paymentDetails.status,
+      createdAt: booking.createdAt
+    }));
+
+    res.status(200).json(new ApiResponse(200, {
+      bookings: formattedBookings,
+      pagination: {
+        total,
+        page,
+        totalPages,
+        size: limit
+      }
+    }));
+
+  } catch (error) {
+    console.error('Error in bookingList:', error);
+    throw error;
+  }
+});
+
