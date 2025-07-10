@@ -89,3 +89,15 @@ export const verifyStripePayment = async (paymentIntentId: string): Promise<Paym
     }
 }
 
+
+export async function updateStripePayment(payIntenId : string , amount : number , currency: string = "usd"): Promise<StripeIntentData> {
+    const updatedPayInten = await stripe.paymentIntents.update(payIntenId , {
+        currency : currency , 
+        amount : amount ,
+    })
+    return  {
+        paymentIntent : updatedPayInten.client_secret, 
+        paymentIntentId : payIntenId ,
+    }
+}
+

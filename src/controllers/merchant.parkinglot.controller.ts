@@ -1,5 +1,6 @@
 import { Request, Response } from "express";
 import {
+  ILotRecord,
   IParking,
   LotRentRecordModel,
   ParkingLotModel,
@@ -12,8 +13,14 @@ import { asyncHandler } from "../utils/asynchandler.js";
 import { generateParkingSpaceID  } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
-import { IUser } from "../models/normalUser.model.js";
+import { IUser, User } from "../models/normalUser.model.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
+import { createStripeCustomer, initPayment, updateStripePayment, verifyStripePayment } from "../utils/stripePayments.js";
+
+type MParkingRes = mongoose.Document<mongoose.Types.ObjectId , {}, IParking> & IParking  ;
+type MLotRecordRes = mongoose.Document<mongoose.Types.ObjectId , {}, ILotRecord> & ILotRecord  ;
+
+type MUserRes = mongoose.Document<mongoose.Types.ObjectId , {}, IUser> & IUser ;
 
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
@@ -159,6 +166,222 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
     }
   }
 });
+const LotCheckOutData = z.object({
+  lotId : z.string(),
+  bookedSlot : z.object({zone : z.string().regex(/^[A-Z]{1,3}$/), slot : z.coerce.number()}),
+  bookedFrom : z.iso.datetime() ,
+  bookedTo : z.iso.datetime(),
+  couponCode : z.string().optional() ,
+}).refine((data) => data.bookedFrom < data.bookedTo) ;
+type LotCheckOutData = z.infer<typeof LotCheckOutData>;
+
+async function findExistingBooking(sd : Date | mongoose.Schema.Types.Date , ed : Date | mongoose.Schema.Types.Date , lotId : string | mongoose.Types.ObjectId , rentedSlotId : string){
+  if(sd >= ed){
+    throw new ApiError(400,"INVALID_DATE") ;
+  }
+    const res = await LotRentRecordModel.find(
+      {
+        lotId: lotId,
+        rentedSlot: rentedSlotId ,
+        "paymentDetails.status" : {$ne : "PENDING"},
+        $or: [
+          { rentFrom: { $lte: sd }, rentTo: { $gte: sd } },
+          { rentFrom: { $lte: ed }, rentTo: { $gte: ed } },
+          { rentFrom: { $gte: sd}, rentTo: { $lte: ed } },
+        ],
+      },
+    ).exec();
+    
+    return res ;
+}   
+function verifySelectedZone(lotDoc : mongoose.Document<mongoose.Types.ObjectId , {}, IParking> & IParking, slot : LotCheckOutData["bookedSlot"]){
+  const selectedZone = lotDoc.spacesList.get(slot.zone) || 0;
+  if(selectedZone < slot.slot){
+    return false ;
+  }
+  return true ;
+}
+function verifyCouponCode(code : string){
+  return code.startsWith("XES") ? 0.20 : 0 ;
+}
+
+const updateACheckout = async ( data : LotCheckOutData, lotDoc : MParkingRes, bookingDoc :MLotRecordRes , bookingId : string | mongoose.Types.ObjectId , user : MUserRes )=>{
+  const bookingFrom = new Date(data.bookedFrom) ;
+  const bookingTo = new Date(data.bookedTo) ;
+  const slotId = generateParkingSpaceID(data.bookedSlot.zone , data.bookedSlot.slot.toString()) ;
+
+  if(!verifySelectedZone(lotDoc,data.bookedSlot)){
+    throw new ApiError(400,"INVALID SLOT") ;
+  }
+
+  const exiestenseBook = await findExistingBooking(bookingFrom , bookingTo, lotDoc._id, slotId )  ;
+  if(exiestenseBook){
+    throw new ApiError(400, "SLOT NOT AVAILABLE")
+  }
+
+
+  const totalHours =( bookingTo.getTime() - bookingFrom.getTime())/(1000*60*60) ;
+  const rate = lotDoc.price ;
+  let discountPercentage = 0 ;//Float
+  if(data.couponCode){
+    discountPercentage = verifyCouponCode(data.couponCode)
+  }
+
+  const totalAmount = totalHours*rate ;
+  const discount = totalAmount*discountPercentage ;
+  const stripDetails = await updateStripePayment(bookingDoc.paymentDetails.stripePaymentDetails.paymentIntentId , totalAmount - discount );
+
+  const updateInfo = await LotRentRecordModel.findByIdAndUpdate(bookingDoc._id , {
+    lotId : lotDoc._id ,
+    rentedSlot : slotId ,
+    renterInfo : user?._id ,
+    rentFrom : bookingFrom,
+    rentTo : bookingTo ,
+    totalAmount : totalAmount ,
+    totalHours : totalHours ,
+    discount : discount ,
+    appliedCouponCode : discountPercentage > 0 && data.couponCode ,
+    amountToPaid : totalAmount-discount ,
+    priceRate : rate ,
+    paymentDetails : {
+      status : "PENDING",
+      amountPaidBy : totalAmount - discount ,
+      stripePaymentDetails : {
+        ...stripDetails,
+        ephemeralKey: bookingDoc.paymentDetails.stripePaymentDetails.ephemeralKey,
+      },
+      paymentMethod : "STRIPE"
+    }
+  }).populate<{lotId: IParking}>("lotId", "parkingName address _id contract email about").orFail()
+  if(updateInfo === null){
+    throw new ApiError(400,"Failed to make") ;
+  }
+  return {
+    bookingId : updateInfo._id ,
+    name : updateInfo.lotId.parkingName,
+    type: "L" ,
+    slot: updateInfo.rentedSlot ,
+    bookingPeriod: {from : updateInfo.rentFrom , to : updateInfo.rentTo},
+    pricing: {
+        priceRate : updateInfo.priceRate ,
+        basePrice:updateInfo.totalAmount,
+        discount: discount,
+        couponApplied: discount > 0,
+        couponDetails: discount>0 ? data.couponCode : null,
+        totalAmount: totalAmount
+      },
+      stripeDetails : updateInfo.paymentDetails.stripePaymentDetails ,
+  }
+}
+const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes , user : MUserRes)=>{
+  const bookingFrom = new Date(data.bookedFrom) ;
+  const bookingTo = new Date(data.bookedTo) ;
+  const slotId = generateParkingSpaceID(data.bookedSlot.zone , data.bookedSlot.slot.toString()) ;
+
+  if(!verifySelectedZone(lotDoc,data.bookedSlot)){
+    throw new ApiError(400,"INVALID SLOT") ;
+  }
+
+  const exiestenseBook = await findExistingBooking(bookingFrom , bookingTo, lotDoc._id, slotId )  ;
+  if(exiestenseBook){
+    throw new ApiError(400, "SLOT NOT AVAILABLE")
+  }
+  
+  const totalHours =( bookingTo.getTime() - bookingFrom.getTime())/(1000*60*60) ;
+  const rate = lotDoc.price ;
+  let discountPercentage = 0 ;//Float
+  if(data.couponCode){
+    discountPercentage = verifyCouponCode(data.couponCode)
+  }
+  
+  const totalAmount = totalHours*rate ;
+  const discount = totalAmount*discountPercentage ;
+  
+  let stripeCustomerId = user.stripeCustomerId ;
+  if(!stripeCustomerId){
+    stripeCustomerId = await createStripeCustomer(user.firstName+" " +user.lastName , user.email);
+    const __user = await User.findByIdAndUpdate(user._id ,{stripeCustomerId}) ;
+    if(!__user) throw new ApiError(500,"Server Error");
+  }
+  const stripeDetails = await initPayment(totalAmount - discount, stripeCustomerId) ;
+
+  const updateInfo = await LotRentRecordModel.create({
+    lotId : lotDoc._id ,
+    rentedSlot : slotId ,
+    renterInfo : user?._id ,
+    rentFrom : bookingFrom,
+    rentTo : bookingTo ,
+    totalAmount : totalAmount ,
+    totalHours : totalHours ,
+    discount : discount ,
+    appliedCouponCode : discountPercentage > 0 && data.couponCode ,
+    amountToPaid : totalAmount-discount ,
+    priceRate : rate ,
+    paymentDetails : {
+      status : "PENDING",
+      amountPaidBy : totalAmount - discount ,
+      stripePaymentDetails : stripeDetails,
+      paymentMethod : "STRIPE"
+    }
+  }) ;
+  return {
+    bookingId : updateInfo._id ,
+    name : lotDoc.parkingName,
+    type : "L",
+    slot: updateInfo.rentedSlot ,
+    bookingPeriod: {from : updateInfo.rentFrom , to : updateInfo.rentTo},
+    pricing: {
+        priceRate : updateInfo.priceRate ,
+        basePrice:updateInfo.totalAmount,
+        discount: discount,
+        couponApplied: discount > 0,
+        couponDetails: discount>0 ? data.couponCode : null,
+        totalAmount: totalAmount
+      },
+      stripeDetails : updateInfo.paymentDetails.stripePaymentDetails ,
+  }
+}
+export const lotCheckOut = asyncHandler(async (req,res)=>{
+  try{
+  const verifiedAuth = await verifyAuthentication(req) ;
+  
+    if (verifiedAuth?.userType !== "user" || !verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+    const USER: MUserRes = verifiedAuth.user as MUserRes ;
+
+    console.log("Validation Succesfull request user is", verifiedAuth.user._id )
+    console.log("Validating req data")
+    const rData = LotCheckOutData.parse(req.body);
+    console.log("Validation Succesfull req data is", rData)
+    
+    const lot = await ParkingLotModel.findById(rData.lotId) ;
+    if(!lot){
+      throw new ApiError(400,"NO LOT FOUND") ;
+    }
+
+    // const rentM = await  LotRentRecordModel.findOne({
+    //   renterInfo : USER._id ,
+    //   "paymentDetails.status" : "PENDING" ,
+    // })
+    
+    const data = await createABooking(rData,lot,USER) ;
+
+    res.status(200).json(new ApiResponse(201,data)) ;
+
+  }catch(error){
+    console.log(error) ;
+    if(error instanceof z.ZodError){
+      throw new ApiError(400,"INVALID DATA", error.issues) ;
+    }
+    if(error instanceof mongoose.MongooseError){
+      throw new ApiError(400,error.name , error.message , error.stack)
+    }
+    throw error ;
+  }
+})
+
+
 
 export const bookASlot = asyncHandler(async (req, res) => {
   let session: mongoose.ClientSession | undefined;
@@ -180,48 +403,35 @@ export const bookASlot = asyncHandler(async (req, res) => {
     normalUser.carLicensePlateImage = carLicensePlateImage;
     await normalUser.save();
 
-    const parkingLot = await ParkingLotModel.findById(rData.lotId);
-    if (!parkingLot) throw new ApiError(400, "Invalid lotId");
-
-    if ((parkingLot.spacesList?.get(rData.rentedSlot.zone) || 0) <= rData.rentedSlot.slot) {
-      throw new ApiError(400, "Invalid selected zone/slot");
-    }
+    const rentRecord = await LotRentRecordModel.findById(rData.bookingId) ;
+    if (!rentRecord) throw new ApiError(400, "Invalid bookingId");
 
     await LotRentRecordModel.createCollection();
     session = await LotRentRecordModel.startSession();
     session.startTransaction();
+    const existbooked = await findExistingBooking(rentRecord.rentFrom , rentRecord.rentTo,rentRecord.lotId, rentRecord.rentedSlot)
 
-    const slotConflicts = await LotRentRecordModel.find(
-      {
-        lotId: rData.lotId,
-        rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
-        $or: [
-          { rentFrom: { $lte: rData.rentFrom }, rentTo: { $gte: rData.rentFrom } },
-          { rentFrom: { $lte: rData.rentTo }, rentTo: { $gte: rData.rentTo } },
-          { rentFrom: { $gte: rData.rentFrom }, rentTo: { $lte: rData.rentTo } },
-        ],
-      },
-      "-renterInfo"
-    ).exec();
-
-    if (slotConflicts.length > 0) {
-      throw new ApiError(400, "Selected slot not available for these dates", slotConflicts);
+    if (!rentRecord.paymentDetails.stripePaymentDetails?.paymentIntentId) {
+      throw new ApiError(400, "NO STRIPE RECORD FOUND");
     }
 
-    const booked = await LotRentRecordModel.create({
-      lotId: rData.lotId,
-      rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
-      rentFrom: new Date(rData.rentFrom),
-      rentTo: new Date(rData.rentTo),
-      renterInfo: vUser.user._id,
-    });
+    const stripRes = await verifyStripePayment(
+      rentRecord.paymentDetails.stripePaymentDetails.paymentIntentId
+    );
+    if (!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION");
+    if(existbooked.length > 0 ){
+      rentRecord.paymentDetails.status = "FAILED" ;
+      await rentRecord.save();
+      throw new ApiError(400, "SLOT_NOT_AVAILABLE");
+    }
 
-    if (!booked) throw new ApiError(400, "Failed to create booking");
-
+    rentRecord.paymentDetails.status = "SUCCESS" ,
+    rentRecord.paymentDetails.paidAt = new Date() ;
+    rentRecord.save() ;
     await session.commitTransaction();
     session = undefined;
 
-    res.status(201).json(new ApiResponse(201, { bookingInfo: booked }, "Slot booked successfully"));
+    res.status(201).json(new ApiResponse(201, { booking: rentRecord }, "Slot booked successfully"));
 
   } catch (err) {
     if (session) await session.abortTransaction();

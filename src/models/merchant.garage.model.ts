@@ -3,6 +3,7 @@ import { generateParkingSpaceID } from "../utils/lotProcessData.js";
 import { StripeIntentData } from "../utils/stripePayments.js";
 
 export interface IGarage {
+  _id : mongoose.Types.ObjectId;
   owner: mongoose.Types.ObjectId;
   garageName: string;
   about: string;

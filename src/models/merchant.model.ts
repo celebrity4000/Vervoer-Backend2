@@ -1,6 +1,8 @@
 import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
 import { BankDetailsSchema ,IBankDetails} from "./bankDetails.model.js";
+import { StripeIntentData } from "../utils/stripePayments.js";
+import { required } from "zod/v4-mini";
 
 export interface IMerchant extends Document {
   phoneNumber: string;
@@ -41,6 +43,7 @@ export const Merchant = mongoose.model<IMerchant>(
 );
 
 export interface IParking {
+  _id : mongoose.Types.ObjectId
   images : [string],
   owner : mongoose.Types.ObjectId ,
   contactNumber : string,
@@ -155,31 +158,99 @@ const parkingLotSchema = new mongoose.Schema<IParking,mongoose.Model<IParking> ,
 })
 
 parkingLotSchema.index({ gpsLocation : '2dsphere' });
-const lotRentRecordSchema = new mongoose.Schema({
-    lotId : {
-        type: mongoose.Schema.Types.ObjectId,
-        ref : "ParkingLot",
+export interface ILotRecord {
+  _id : mongoose.Types.ObjectId,
+  lotId: mongoose.Types.ObjectId;
+  renterInfo: mongoose.Types.ObjectId;
+  rentedSlot: string;
+  rentFrom: mongoose.Schema.Types.Date;
+  rentTo: mongoose.Schema.Types.Date;
+  totalHours : number ;
+  totalAmount: number;
+  priceRate : number ;
+  amountToPaid: number;
+  appliedCouponCode: string;
+  discount: number;
+  paymentDetails: {
+    transactionId: string | null;
+    paymentMethod: "CASH" | "CREDIT" | "DEBIT" | "STRIPE";
+    status : "PENDING" | "FAILED" | "SUCCESS" ;
+    amountPaidBy: number;
+    paidAt : Date ,
+    stripePaymentDetails: StripeIntentData;
+  };
+}
+const lotRentRecordSchema = new mongoose.Schema<ILotRecord , mongoose.Model<ILotRecord>>({
+  lotId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "ParkingLot",
+  },
+  renterInfo: {
+    type: mongoose.Schema.Types.ObjectId,
+    // ref : "User"
+  },
+  rentedSlot: {
+    type: String, // Zone + Number
+    required: true,
+  },
+  rentFrom: {
+    type: mongoose.Schema.Types.Date,
+    required: true,
+  },
+  rentTo: {
+    type: mongoose.Schema.Types.Date,
+    required: true,
+  },
+  totalHours: {
+    type: Number,
+    required: true,
+  },
+  priceRate: {
+    type: Number,
+    required: true,
+  },
+  totalAmount: {
+    type: Number,
+    required: true,
+  },
+  amountToPaid: {
+    type: Number,
+    required: true,
+  },
+  appliedCouponCode: String,
+  discount: {
+    type: Number,
+    required: true,
+    default: 0,
+  },
+  paymentDetails: {
+    type :  new mongoose.Schema(
+    {
+      transactionId: String,
+      paymentMethod: {
+        type: String,
+        enums: ["CASH", "CREDIT", "DEBIT", "STRIP"],
+        default: "STRIP",
+      },
+      paidAt : Date ,
+      status : {
+        type : String ,
+        enums : ["PENDING" , "FAILED", "SUCCESS"],
+        default : "PENDING" ,
+      },
+      amountPaidBy: Number,
+      stripePaymentDetails:{type : new mongoose.Schema({
+        paymentIntent: {type : String , required : true},
+        ephemeralKey: String,
+        paymentIntentId: {type :String, required : true},
+      },{_id: false})}
     },
-    renterInfo : {
-        type: mongoose.Schema.Types.ObjectId ,
-        // ref : "User"
-    },
-    rentedSlot : {
-        type: String , // Zone + Number
-        required : true ,
-    },
-    rentFrom : {
-        type : mongoose.Schema.Types.Date ,
-        required : true ,
-    },
-    rentTo : {
-        type: mongoose.Schema.Types.Date,
-        required: true
-    },
-})
+    { _id: false }
+  ),}
+});
 
-export const ParkingLotModel = mongoose.model("ParkingLot",parkingLotSchema) ;
-export const LotRentRecordModel = mongoose.model("LotRentRecord", lotRentRecordSchema)
+export const ParkingLotModel = mongoose.model<IParking>("ParkingLot",parkingLotSchema) ;
+export const LotRentRecordModel = mongoose.model<ILotRecord>("LotRentRecord", lotRentRecordSchema)
 
 const addressSchema = new mongoose.Schema({
   street:   { type: String, required: true },

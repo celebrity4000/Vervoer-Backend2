@@ -2,10 +2,11 @@ import { Request } from "express";
 import { jwtDecode } from "../utils/jwt.js";
 import z from "zod";
 import { ApiError } from "../utils/apierror.js";
-import { User } from "../models/normalUser.model.js";
-import { Driver } from "../models/driver.model.js";
-import { Merchant } from "../models/merchant.model.js";
+import { IUser, User } from "../models/normalUser.model.js";
+import { Driver, IDriver } from "../models/driver.model.js";
+import { IMerchant, Merchant } from "../models/merchant.model.js";
 import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
 
 export async function verifyAuthentication(req: Request) {
   try {
@@ -30,20 +31,20 @@ export async function verifyAuthentication(req: Request) {
 
     switch (decode.userType) {
       case "user":
-        const fUser = await User.findById(decode.userId);
+        const fUser: mongoose.Document<mongoose.Types.ObjectId , {},IUser> & IUser| null = await User.findById(decode.userId);
         if (!fUser) {
           throw new ApiError(401, "UNKNOWN_USER");
         }
         return { user: fUser, userType: "user" };
 
       case "driver":
-        const dUser = await Driver.findById(decode.userId);
+        const dUser: mongoose.Document<mongoose.Types.ObjectId , {},IDriver> & IDriver| null = await Driver.findById(decode.userId);
         if (!dUser) {
           throw new ApiError(401, "UNKNOWN_USER");
         }
         return { user: dUser, userType: "driver" };
       case "merchant":
-        const mUser = await Merchant.findById(decode.userId);
+        const mUser: mongoose.Document<mongoose.Types.ObjectId , {},IMerchant> & IMerchant| null = await Merchant.findById(decode.userId);
         if (!mUser) {
           throw new ApiError(401, "UNKNOWN_USER");
         }

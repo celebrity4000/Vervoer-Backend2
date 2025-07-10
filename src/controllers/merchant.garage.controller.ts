@@ -327,7 +327,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     }
     let stripeCustomerId = verifiedAuth.user.stripeCustomerId ;
     if(!stripeCustomerId){
-      stripeCustomerId = await createStripeCustomer(verifiedAuth.user.firstName +verifiedAuth.user.lastName , verifiedAuth.user.email);
+      stripeCustomerId = await createStripeCustomer(verifiedAuth.user.firstName+" " +verifiedAuth.user.lastName , verifiedAuth.user.email);
       User.findByIdAndUpdate(verifiedAuth.user._id ,{stripeCustomerId}) ;
     }
 
@@ -359,7 +359,8 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     console.log(booking) ;
     const response = {
       bookingId: booking._id,
-      garageName: garage.garageName,
+      type:"G",
+      name: garage.garageName,
       slot: booking.bookedSlot,
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
@@ -574,8 +575,8 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
     
     // Find the booking and populate related data
     const booking = await GarageBooking.findById(bookingId)
-      .populate('garageId', 'garageName address contactNumber')
-      .populate('customerId', 'firstName lastName email phoneNumber')
+      .populate<{garageId : IGarage}>('garageId', 'garageName address contactNumber _id').orFail()
+      .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id').orFail()
       .lean();
 
     if (!booking) {
@@ -621,8 +622,7 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
         method: booking.paymentDetails.method,
         paidAt : booking.paymentDetails.paidAt
         
-      },
-      createdAt: booking.createdAt
+      }
     };
 
     res.status(200).json(new ApiResponse(200, response));
@@ -702,8 +702,8 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     console.log("query at garage: ", query);
     // Get paginated bookings with related data
     const bookings = await GarageBooking.find({$and :[query , {"paymentDetails.status" : {$ne : "PENDING"}}]})
-      .populate('garageId', 'garageName address contactNumber')
-      .populate('customerId', 'firstName lastName email phoneNumber')
+      .populate<{garageId : IGarage}>('garageId', 'garageName address contactNumber _id').orFail()
+      .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id').orFail()
       .sort({ createdAt: -1 }) // Most recent first
       .skip(skip)
       .limit(limit)
@@ -738,7 +738,6 @@ export const garageBookingList = asyncHandler(async (req, res) => {
         paidAt : booking.paymentDetails.paidAt ,
       },
       status: booking.paymentDetails.status,
-      createdAt: booking.createdAt
     }));
 
     res.status(200).json(new ApiResponse(200, {

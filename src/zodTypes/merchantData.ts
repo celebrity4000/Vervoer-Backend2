@@ -36,10 +36,7 @@ export const ParkingData = z.object({
 });
 
 export const BookingData = z.object({
-    rentFrom : z.iso.date() ,
-    rentTo : z.iso.date() ,
-    lotId: z.string(),
-    rentedSlot: z.object({zone : z.string().regex(/[A-Z]{1,3}/) ,slot : z.coerce.number().lt(1000).positive() }) ,
+    bookingId : z.string() ,
     carLicensePlateImage: z.string().min(1, "Car license plate image string is required"),
 
 })

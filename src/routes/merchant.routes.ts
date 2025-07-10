@@ -3,9 +3,10 @@ import {bookASlot, deleteParking, editParkingLot,
     getAvailableSpace, getListOfParkingLot, getParkingLotbyId,
     registerParkingLot} from "../controllers/merchant.parkinglot.controller.js"
 import { imageUpload } from "../middleware/upload.middleware.js";
-import { bookGarageSlot, checkoutGarageSlot, deleteGarage, 
-    editGarage, garageBookingInfo, garageBookingList, getAvailableGarageSlots, getBookingInfo, getGarageDetails, 
-    getListOfGarage, registerGarage } from "../controllers/merchant.garage.controller.js";
+import { registerGarage , editGarage , deleteGarage , getAvailableGarageSlots ,
+    bookGarageSlot,getListOfGarage , checkoutGarageSlot, 
+    garageBookingInfo, garageBookingList,getGarageDetails
+}from "../controllers/merchant.garage.controller.js";
 import { addResidence, deleteResidence, getListOfResidence, getResidenceById, updateResidence } from "../controllers/merchant.residence.controller.js";
 import {imageUploadFields} from "../middleware/upload.middleware.js";
 
