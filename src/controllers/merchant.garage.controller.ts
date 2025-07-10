@@ -498,33 +498,37 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
   }
 });
 
-export const deleteGarage = asyncHandler(async (req,res)=>{
-  try{
-  const garageId = z.string().parse(req.query.id);
-  const authUser = await verifyAuthentication(req);
-  if(!authUser?.user || authUser.userType !== "merchant") throw new ApiError(403,"UNAUTHORIZED_ACCESS")
-  const del = Garage.findOneAndDelete({
-    _id: garageId,
-    owner: authUser?.user
-  })
-  if(!del){
-    if(await Garage.findById(garageId))throw new ApiError(403, "ACCESS_DENIED");
-    throw new ApiError(404,"NOT_FOUND");
-  }else {
-    res.status(200).json(new ApiResponse(200,del)) ;
+export const deleteGarage = asyncHandler(async (req, res) => {
+  try {
+    const garageId = z.string().parse(req.params.id);  // <-- fixed here
+
+    const authUser = await verifyAuthentication(req);
+    if (!authUser?.user || authUser.userType !== "merchant")
+      throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+
+    const del = await Garage.findOneAndDelete({  // <-- added await here
+      _id: garageId,
+      owner: authUser.user,
+    });
+
+    if (!del) {
+      if (await Garage.findById(garageId)) throw new ApiError(403, "ACCESS_DENIED");
+      throw new ApiError(404, "NOT_FOUND");
+    }
+
+    res.status(200).json(new ApiResponse(200, del, "Garage deleted successfully"));
+  } catch (error) {
+    if (error instanceof z.ZodError) throw new ApiError(400, "INVALID_DATA");
+    throw error;
   }
-  }catch(error){
-    if(error instanceof z.ZodError) throw new ApiError(400,"INVALID_DATA") ;
-    throw error ;
-  }
-})
+});
+
 
 export const getListOfGarage = asyncHandler(async (req, res) => {
   try {
     const longitude = z.coerce.number().optional().parse(req.query.longitude);
     const latitude = z.coerce.number().optional().parse(req.query.latitude);
     const owner = z.string().optional().parse(req.query.owner) ;
-    console.log(longitude, latitude);
     const queries: mongoose.FilterQuery<IGarage> = {};
     if(owner){
       queries.owner = owner ;

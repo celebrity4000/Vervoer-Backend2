@@ -13,8 +13,8 @@ import { generateParkingSpaceID  } from "../utils/lotProcessData.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
 import { IUser } from "../models/normalUser.model.js";
-
 import uploadToCloudinary from "../utils/cloudinary.js";
+
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
@@ -165,31 +165,20 @@ export const bookASlot = asyncHandler(async (req, res) => {
 
   try {
     const vUser = await verifyAuthentication(req);
-
-    if (!(vUser?.userType === "user")) {
+    if (!vUser || vUser.userType !== "user") {
       throw new ApiError(401, "User must be a verified user");
     }
-    console.log(req.body);
+
     const rData = BookingData.parse(req.body);
 
-    const files = req.files as { [fieldname: string]: Express.Multer.File[] };
-    const carLicensePlateImage = files["carLicensePlateImage"]?.[0];
-    if (!carLicensePlateImage) {
-      throw new ApiError(400, "Car license plate image is required");
+    const { carLicensePlateImage } = rData;
+    if (!carLicensePlateImage || typeof carLicensePlateImage !== "string") {
+      throw new ApiError(400, "Car license plate image string is required");
     }
 
-    const uploadResult = await uploadToCloudinary(carLicensePlateImage.buffer);
-    if (!uploadResult.secure_url) {
-      throw new ApiError(500, "Failed to upload license plate image");
-    }
-
-    const imageUrl = uploadResult.secure_url;
-
-    if (vUser.userType === "user") {
-      const normalUser = vUser.user as IUser;
-      normalUser.carLicensePlateImage = imageUrl;
-      await normalUser.save();
-    }
+    const normalUser = vUser.user as IUser;
+    normalUser.carLicensePlateImage = carLicensePlateImage;
+    await normalUser.save();
 
     const parkingLot = await ParkingLotModel.findById(rData.lotId);
     if (!parkingLot) throw new ApiError(400, "Invalid lotId");
@@ -207,9 +196,9 @@ export const bookASlot = asyncHandler(async (req, res) => {
         lotId: rData.lotId,
         rentedSlot: generateParkingSpaceID(rData.rentedSlot.zone, rData.rentedSlot.slot.toString()),
         $or: [
-          { $and: [{ rentFrom: { $lte: rData.rentFrom } }, { rentTo: { $gte: rData.rentFrom } }] },
-          { $and: [{ rentFrom: { $lte: rData.rentTo } }, { rentTo: { $gte: rData.rentTo } }] },
-          { $and: [{ rentFrom: { $gte: rData.rentFrom } }, { rentTo: { $lte: rData.rentTo } }] },
+          { rentFrom: { $lte: rData.rentFrom }, rentTo: { $gte: rData.rentFrom } },
+          { rentFrom: { $lte: rData.rentTo }, rentTo: { $gte: rData.rentTo } },
+          { rentFrom: { $gte: rData.rentFrom }, rentTo: { $lte: rData.rentTo } },
         ],
       },
       "-renterInfo"
@@ -227,7 +216,7 @@ export const bookASlot = asyncHandler(async (req, res) => {
       renterInfo: vUser.user._id,
     });
 
-    if (!booked) throw new ApiError(400, "Failed booking");
+    if (!booked) throw new ApiError(400, "Failed to create booking");
 
     await session.commitTransaction();
     session = undefined;
@@ -245,8 +234,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
     }
   }
 });
-
-
 
 export const getParkingLotbyId = asyncHandler(async (req,res)=>{
   const lotId = req.params.id ;
