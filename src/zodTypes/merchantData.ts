@@ -39,7 +39,8 @@ export const BookingData = z.object({
     rentFrom : z.iso.date() ,
     rentTo : z.iso.date() ,
     lotId: z.string(),
-    rentedSlot: z.object({zone : z.string().regex(/[A-Z]{1,3}/) ,slot : z.coerce.number().lt(1000).positive() }) 
+    rentedSlot: z.object({zone : z.string().regex(/[A-Z]{1,3}/) ,slot : z.coerce.number().lt(1000).positive() }) ,
+    carLicensePlateImage: z.string().min(1, "Car license plate image string is required"),
 
 })
 export type BookingData = z.infer<typeof BookingData> 

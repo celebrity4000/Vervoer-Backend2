@@ -3,12 +3,13 @@ import { ApiError } from "../utils/apierror.js";
 import { ApiResponse } from "../utils/apirespone.js";
 import jwt from "jsonwebtoken";
 import { User } from "../models/normalUser.model.js";
-import { Merchant } from "../models/merchant.model.js";
+import { DryCleaner, Merchant } from "../models/merchant.model.js";
 import { sendEmail,generateOTP,getOtpExpiry } from "../utils/mailer.utils.js";
 import { BlacklistedToken } from "../models/blacklistedToken.model.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { Admin } from "../models/adminBank.model.js";
 import { z } from "zod";
+import { Garage } from "../models/merchant.garage.model.js";
 
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
@@ -200,4 +201,87 @@ export const getMerchantById = asyncHandler(async (req, res) => {
   }
 
   res.status(200).json(new ApiResponse(200, { merchant }));
+});
+
+
+// garage
+export const getAllGarages = asyncHandler(async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+
+  const token = authHeader.split(" ")[1];
+  const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+
+  if (!decoded || decoded.role !== "admin") {
+    throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+  }
+
+  const garages = await Garage.find().populate("owner", "name email phoneNumber");
+
+  res.status(200).json(
+    new ApiResponse(200, garages, "All garages fetched successfully")
+  );
+});
+
+export const getGarageById = asyncHandler(async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+
+  const token = authHeader.split(" ")[1];
+  const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+
+  if (!decoded || decoded.role !== "admin") {
+    throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+  }
+
+  const { id } = req.params;
+
+  const garage = await Garage.findById(id).populate("owner", "name email phoneNumber");
+
+  if (!garage) {
+    throw new ApiError(404, "Garage not found");
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, garage, "Garage details fetched successfully")
+  );
+});
+
+export const deleteGarageById = asyncHandler(async (req, res) => {
+  const garageId = req.params.id;
+
+  const garage = await Garage.findById(garageId);
+  if (!garage) {
+    throw new ApiError(404, "Garage not found");
+  }
+
+  await garage.deleteOne();
+
+  res
+    .status(200)
+    .json(new ApiResponse(200, null, "Garage deleted successfully"));
+});
+
+// drycleaner
+export const getAllDryCleaner = asyncHandler(async (req, res) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+  const token = authHeader.split(" ")[1];
+  const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+  if (!decoded || decoded.role !== "admin") {
+    throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+  }
+  const dryCleaners = await DryCleaner.find();
+  if (!dryCleaners || dryCleaners.length === 0) {
+    throw new ApiError(404, "No dry cleaners found");
+  }
+  res.status(200).json(
+    new ApiResponse(200, dryCleaners, "All dry cleaners fetched successfully")
+  );
 });
