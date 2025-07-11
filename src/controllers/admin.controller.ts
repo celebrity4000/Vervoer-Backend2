@@ -9,7 +9,9 @@ import { BlacklistedToken } from "../models/blacklistedToken.model.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { Admin } from "../models/adminBank.model.js";
 import { z } from "zod";
-import { Garage } from "../models/merchant.garage.model.js";
+import { Garage, GarageBooking } from "../models/merchant.garage.model.js";
+import mongoose from "mongoose";
+import { request } from "http";
 
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
@@ -283,5 +285,48 @@ export const getAllDryCleaner = asyncHandler(async (req, res) => {
   }
   res.status(200).json(
     new ApiResponse(200, dryCleaners, "All dry cleaners fetched successfully")
+  );
+});
+
+export const getGarageBookingSummary = asyncHandler(async (req, res) => {
+  const { garageId } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(garageId)) {
+    throw new ApiError(400, "Invalid Garage ID");
+  }
+
+  const result = await GarageBooking.aggregate([
+    {
+      $match: { garageId: new mongoose.Types.ObjectId(garageId) },
+    },
+    {
+      $group: {
+        _id: "$garageId",
+        totalBookings: { $sum: 1 },
+        totalAmount: { $sum: "$totalAmount" },
+        slotsBooked: { $addToSet: "$bookedSlot" },
+      },
+    },
+  ]);
+
+  if (!result.length) {
+    res.status(200).json(
+      new ApiResponse(200, {
+        totalBookings: 0,
+        totalAmount: 0,
+        slotsBooked: [],
+      }, "No bookings found for this garage.")
+    );
+    return;
+  }
+
+  const { totalBookings, totalAmount, slotsBooked } = result[0];
+
+  res.status(200).json(
+    new ApiResponse(200, {
+      totalBookings,
+      totalAmount,
+      slotsBooked,
+    }, "Garage booking summary fetched successfully.")
   );
 });

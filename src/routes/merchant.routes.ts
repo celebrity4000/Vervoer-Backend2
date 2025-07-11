@@ -4,10 +4,9 @@ import {bookASlot, deleteParking, editParkingLot,
     lotCheckOut,
     registerParkingLot} from "../controllers/merchant.parkinglot.controller.js"
 import { imageUpload } from "../middleware/upload.middleware.js";
-import { registerGarage , editGarage , deleteGarage , getAvailableGarageSlots ,
-    bookGarageSlot,getListOfGarage , checkoutGarageSlot, 
-    garageBookingInfo, garageBookingList,getGarageDetails
-}from "../controllers/merchant.garage.controller.js";
+import { bookGarageSlot, checkoutGarageSlot, deleteGarage, 
+    editGarage, garageBookingInfo, garageBookingList, getAvailableGarageSlots, getGarageDetails, 
+    getListOfGarage, registerGarage } from "../controllers/merchant.garage.controller.js";
 import { addResidence, deleteResidence, getListOfResidence, getResidenceById, updateResidence } from "../controllers/merchant.residence.controller.js";
 import {imageUploadFields} from "../middleware/upload.middleware.js";
 

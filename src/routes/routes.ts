@@ -6,7 +6,8 @@ import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../cont
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {registerDriver,} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner} from "../controllers/admin.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary} from "../controllers/admin.controller.js";
+import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.parkinglot.controller.js";
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
@@ -76,6 +77,10 @@ router.get("/admin/get-all-garages", isAdmin, getAllGarages);
 router.delete("/admin/delete-garage/:id", isAdmin, deleteGarageById);
 router.get("/admin/get-garage/:id", isAdmin, getGarageById);
 router.get("/admin/get-all-dry-cleaners", isAdmin, getAllDryCleaner);
+router.get("/admin/get-garage-booking-summary/:garageId", isAdmin, getGarageBookingSummary);
+router.post("/admin/get-parking-lot/:id", isAdmin, getParkingLotbyId);
+router.get("/admin/get-list-of-parking-lots", isAdmin, getListOfParkingLot);
+
 
 // Payment gateway route
 router.post("/create-payment", authenticate, createPayment);
