@@ -10,6 +10,7 @@ import { asyncHandler } from "../utils/asynchandler.js";
 import { Admin } from "../models/adminBank.model.js";
 import { z } from "zod";
 import { Garage, GarageBooking } from "../models/merchant.garage.model.js";
+import { ParkingLotModel } from "../models/merchant.model.js";
 import mongoose from "mongoose";
 import { request } from "http";
 
@@ -329,4 +330,25 @@ export const getGarageBookingSummary = asyncHandler(async (req, res) => {
       slotsBooked,
     }, "Garage booking summary fetched successfully.")
   );
+});
+
+
+// delete parking lot
+export const adminDeleteParking = asyncHandler(async (req, res) => {
+  try {
+    const lotId = z.string().parse(req.params.id); // from params
+
+    const lot = await ParkingLotModel.findById(lotId);
+    if (!lot) throw new ApiError(404, "NOT_FOUND");
+
+    await lot.deleteOne();
+
+    res
+      .status(200)
+      .json(new ApiResponse(200, lot, "DELETE SUCCESSFUL (Admin)"));
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "INVALID_ID");
+    } else throw error;
+  }
 });
