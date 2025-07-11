@@ -78,7 +78,7 @@ router.delete("/admin/delete-garage/:id", isAdmin, deleteGarageById);
 router.get("/admin/get-garage/:id", isAdmin, getGarageById);
 router.get("/admin/get-all-dry-cleaners", isAdmin, getAllDryCleaner);
 router.get("/admin/get-garage-booking-summary/:garageId", isAdmin, getGarageBookingSummary);
-router.post("/admin/get-parking-lot/:id", isAdmin, getParkingLotbyId);
+router.get("/admin/get-parking-lot/:id", isAdmin, getParkingLotbyId);
 router.get("/admin/get-list-of-parking-lots", isAdmin, getListOfParkingLot);
 
 
