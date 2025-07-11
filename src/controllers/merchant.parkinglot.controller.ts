@@ -68,7 +68,7 @@ export const registerParkingLot = asyncHandler(
 export const editParkingLot = asyncHandler(async (req: Request, res: Response) => {
   try {
     const parkingLotId = z.string().parse(req.params.id);
-    const updateData = ParkingData.parse(req.body);
+    const updateData = ParkingData.partial().parse(req.body);
     const verifiedAuth = await verifyAuthentication(req);
 
     if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
@@ -123,7 +123,7 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
     const lotData = await ParkingLotModel.findById(lotID);
     let totalSpace = 0 ;
     if (!lotData) throw new ApiError(400, "Can't Find The Lot");
-    lotData.spacesList?.forEach(v => {totalSpace+=v}) ;
+    lotData.spacesList?.forEach(v => {totalSpace+=v.count}) ;
 
     const result = await LotRentRecordModel.find(
           {
@@ -195,7 +195,7 @@ async function findExistingBooking(sd : Date | mongoose.Schema.Types.Date , ed :
     return res ;
 }   
 function verifySelectedZone(lotDoc : mongoose.Document<mongoose.Types.ObjectId , {}, IParking> & IParking, slot : LotCheckOutData["bookedSlot"]){
-  const selectedZone = lotDoc.spacesList.get(slot.zone) || 0;
+  const selectedZone = lotDoc.spacesList.get(slot.zone)?.count || 0;
   if(selectedZone < slot.slot){
     return false ;
   }
@@ -478,6 +478,164 @@ export const deleteParking = asyncHandler(
     }
   }
 )
+
+export const getBookingById = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.bookingId);
+    
+    const booking = await LotRentRecordModel.findById(bookingId)
+      .populate<{lotId : IParking}>('lotId', 'name address contactNumber')
+      .populate<{renterInfo : IUser}>('renterInfo', 'firstName lastName email phoneNumber')
+      .lean();
+
+    if (!booking) {
+      throw new ApiError(404, 'Booking not found');
+    }
+
+    // Verify the requesting merchant owns this parking lot
+    const parkingLot = await ParkingLotModel.findById(booking.lotId);
+    const verifiedAuth = await verifyAuthentication(req);
+    
+    if (!verifiedAuth || !verifiedAuth.user || parkingLot?.owner.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, 'Unauthorized access to this booking');
+    }
+
+    const response = {
+      _id: booking._id,
+      parking: {
+        _id: booking.lotId._id,
+        name: booking.lotId.parkingName,
+        address: booking.lotId.address,
+        contactNumber: booking.lotId.contactNumber
+      },
+      customer: {
+        _id: booking.renterInfo._id,
+        name: `${booking.renterInfo.firstName} ${booking.renterInfo.lastName || ''}`.trim(),
+        email: booking.renterInfo.email,
+        phone: booking.renterInfo.phoneNumber
+      },
+      bookingPeriod: {
+        from: booking.rentFrom,
+        to: booking.rentTo,
+        totalHours: booking.totalHours
+      },
+      // vehicleNumber: booking.vehicleNumber, // TODO: add vehicleNumber
+      bookedSlot: booking.rentedSlot,
+      priceRate: booking.priceRate,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount || 0,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.paymentMethod,
+        paidAt: booking.paymentDetails.paidAt,
+      },
+      status: booking.paymentDetails.status,
+      createdAt: booking.createdAt,
+      updatedAt: booking.updatedAt
+    };
+
+    res.status(200).json(
+      new ApiResponse(200, response, 'Booking details fetched successfully')
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, 'Invalid booking ID format');
+    }
+    throw error;
+  }
+});
+
+export const getBookingList = asyncHandler(async (req, res) => {
+  try {
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user || verifiedAuth.userType === "driver" ) {
+      throw new ApiError(401, 'Unauthorized');
+    }
+
+    const { page = 1, limit = 10, status } = req.query;
+    const pageNum = parseInt(page as string);
+    const limitNum = parseInt(limit as string);
+    const skip = (pageNum - 1) * limitNum;
+
+    const filter: any = {};
+    
+    // If status is provided, add it to the filter
+    if (status) {
+      filter['paymentDetails.status'] = status;
+    }else {
+      filter["paymentDetails.status"] = {$ne : "PENDING"};
+    }
+
+    // Get all parking lots owned by the merchant
+    if(verifiedAuth.userType === "merchant"){
+      const parkingLots = await ParkingLotModel.find({ owner: verifiedAuth.user._id }, '_id');
+      const parkingLotIds = parkingLots.map(lot => lot._id);
+      
+      // Add parking lot filter
+      filter.lotId = { $in: parkingLotIds };
+    }
+
+    const [bookings, totalCount] = await Promise.all([
+      LotRentRecordModel.find(filter)
+        .populate<{lotId : IParking}>('lotId', 'name address contactNumber')
+        .populate<{renterInfo : IUser}>('renterInfo', 'firstName lastName email phoneNumber')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limitNum)
+        .lean(),
+      LotRentRecordModel.countDocuments(filter)
+    ]);
+
+    const formattedBookings = bookings.map(booking => ({
+      _id: booking._id,
+      parking: {
+        _id: booking.lotId._id,
+        name: booking.lotId.parkingName,
+        address: booking.lotId.address,
+        contactNumber: booking.lotId.contactNumber
+      },
+      customer: {
+        _id: booking.renterInfo._id,
+        name: `${booking.renterInfo.firstName} ${booking.renterInfo.lastName || ''}`.trim(),
+        email: booking.renterInfo.email,
+        phone: booking.renterInfo.phoneNumber
+      },
+      bookingPeriod: {
+        from: booking.rentFrom,
+        to: booking.rentTo,
+        totalHours: booking.totalHours
+      },
+      // vehicleNumber: booking.vehicleNumber, // TODO
+      bookedSlot: booking.rentedSlot,
+      priceRate: booking.priceRate,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount || 0,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.paymentMethod,
+        paidAt: booking.paymentDetails.paidAt,
+      },
+      status: booking.paymentDetails.status,
+      createdAt: booking.createdAt
+    }));
+
+    res.status(200).json(
+      new ApiResponse(200, {
+        bookings: formattedBookings,
+        pagination: {
+          total: totalCount,
+          page: pageNum,
+          limit: limitNum,
+          totalPages: Math.ceil(totalCount / limitNum)
+        }
+      }, 'Bookings fetched successfully')
+    );
+  } catch (error) {
+    throw error;
+  }
+});
 
 export const getListOfParkingLot = asyncHandler(async (req, res)=>{
   try {

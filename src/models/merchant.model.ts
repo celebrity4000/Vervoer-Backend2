@@ -54,7 +54,7 @@ export interface IParking {
   gpsLocation? : {type : "Point", coordinates : [number,number]},
   price : number ,
   about : string ,
-  spacesList : Map<string,number>,
+  spacesList : Map<string,{count : number , price : number}>,
   generalAvailable : [{
     day : "SUN" |  "MON" |  "TUE" |  "WED" |  "THU" |  "FRI" |  "SAT",
     isOpen? : boolean,
@@ -113,7 +113,13 @@ const parkingLotSchema = new mongoose.Schema<IParking,mongoose.Model<IParking> ,
     },
     spacesList : {
         type : mongoose.Schema.Types.Map ,
-        of : Number,
+        of : new mongoose.Schema(
+        {
+          count: { type: Number, required: true },
+          price: { type: Number, required: true },
+        },
+        { _id: false }
+      ),
     },
     generalAvailable: [{
       day: {

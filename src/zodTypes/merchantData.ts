@@ -18,7 +18,10 @@ export const ParkingData = z.object({
     images : z.array(z.url()).optional(),
     contactNumber : z.string().nonempty(),
     gpsLocation: gpsLocationSchema,
-    spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.coerce.number()).optional(),
+    spacesList: z.record(z.string().regex(/^[A-Z]{1,3}$/),z.object({
+        count : z.coerce.number() ,
+        price : z.coerce.number()
+    })),
     generalAvailable: z.array(availableDaySchema).nonempty().check((zo)=>{
        const counter = new Set<string>() ;
        zo.value.forEach((e)=>{
