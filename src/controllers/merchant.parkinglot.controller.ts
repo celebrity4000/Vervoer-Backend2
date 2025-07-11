@@ -1,8 +1,10 @@
 import { Request, Response } from "express";
 import {
   ILotRecord,
+  IMerchant,
   IParking,
   LotRentRecordModel,
+  Merchant,
   ParkingLotModel,
 } from "../models/merchant.model.js";
 import { BookingData, ParkingData } from "../zodTypes/merchantData.js";
@@ -507,7 +509,15 @@ export const getLotBookingById = asyncHandler(async (req: Request, res: Response
     console.log("Requested booking Id:",bookingId);
     console.log("Requestedby:",verifiedAuth.user);
     const booking = await LotRentRecordModel.findById(bookingId)
-      .populate<{lotId : IParking}>('lotId', 'name address contactNumber owner')
+      .populate<{lotId : IParking &{owner : IMerchant}}>({
+              path :'lotId', 
+              select : 'parkingName address contactNumber _id owner',
+              populate : {
+                path : "owner" ,
+                model : Merchant,
+                select :"firstName lastName email phoneNumber _id"
+              }
+            })
       .populate<{renterInfo : IUser}>('renterInfo', 'firstName lastName email phoneNumber')
       .lean();
 
@@ -530,7 +540,8 @@ export const getLotBookingById = asyncHandler(async (req: Request, res: Response
         _id: booking.lotId._id,
         name: booking.lotId.parkingName,
         address: booking.lotId.address,
-        contactNumber: booking.lotId.contactNumber
+        contactNumber: booking.lotId.contactNumber,
+        ownerName : `${booking.lotId.owner.firstName} ${booking.lotId.owner.lastName}`
       },
       customer: {
         _id: booking.renterInfo._id,
@@ -610,7 +621,15 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
 
     const [bookings, totalCount] = await Promise.all([
       LotRentRecordModel.find(filter)
-        .populate<{lotId : IParking}>('lotId', 'parkingName address contactNumber _id')
+        .populate<{lotId : IParking &{owner : IMerchant}}>({
+          path :'lotId', 
+          select : 'parkingName address contactNumber _id owner',
+          populate : {
+            path : "owner" ,
+            model : Merchant,
+            select :"firstName lastName email phoneNumber _id"
+          }
+        })
         .populate<{renterInfo : IUser}>('renterInfo', 'firstName lastName email phoneNumber _id')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -625,7 +644,8 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         _id: booking.lotId?._id.toString(),
         name: booking.lotId?.parkingName,
         address: booking.lotId?.address,
-        contactNumber: booking.lotId?.contactNumber
+        contactNumber: booking.lotId?.contactNumber,
+        ownerName : `${booking.lotId.owner.firstName} ${booking.lotId.owner.lastName}`
       },
       customer: {
         _id: booking.renterInfo?._id.toString(),

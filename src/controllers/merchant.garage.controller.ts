@@ -10,6 +10,7 @@ import { generateParkingSpaceID } from "../utils/lotProcessData.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { IUser, User } from "../models/normalUser.model.js";
 import { createStripeCustomer, initPayment, verifyStripePayment } from "../utils/stripePayments.js";
+import { IMerchant, Merchant } from "../models/merchant.model.js";
 
 // Zod schemas for validation
 const GarageData = z.object({
@@ -650,7 +651,15 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
     
     // Find the booking and populate related data
     const booking = await GarageBooking.findById(bookingId)
-      .populate<{garageId : IGarage}>('garageId', 'garageName address contactNumber _id').orFail()
+      .populate<{garageId : IGarage & {owner : IMerchant}}>({
+        path :'garageId', 
+        select : 'garageName address contactNumber _id owner',
+        populate : {
+          path : "owner" ,
+          model : Merchant,
+          select :"firstName lastName email phoneNumber _id"
+        }
+      }).orFail()
       .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id').orFail()
       .lean();
 
@@ -671,13 +680,15 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
     }
 
     // Format the response
+    console.log(booking) ;
     const response = {
       _id: booking._id,
       garage: {
         _id: booking.garageId._id,
         name: booking.garageId.garageName,
         address: booking.garageId.address,
-        contactNumber: booking.garageId.contactNumber
+        contactNumber: booking.garageId.contactNumber,
+        ownerName : `${booking.garageId.owner?.firstName} ${booking.garageId.owner?.lastName}`
       },
       type : "G",
       customer: {
@@ -778,7 +789,15 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     console.log("query at garage: ", query);
     // Get paginated bookings with related data
     const bookings = await GarageBooking.find({$and :[query , {"paymentDetails.status" : {$ne : "PENDING"}}]})
-      .populate<{garageId : IGarage}>('garageId', 'garageName address contactNumber _id').orFail()
+      .populate<{garageId : IGarage &{owner:IMerchant}}>({
+        path :'garageId', 
+        select : 'garageName address contactNumber _id owner',
+        populate : {
+          path : "owner" ,
+          model : Merchant,
+          select :"firstName lastName email phoneNumber _id"
+        }
+      }).orFail()
       .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id').orFail()
       .sort({ createdAt: -1 }) // Most recent first
       .skip(skip)
