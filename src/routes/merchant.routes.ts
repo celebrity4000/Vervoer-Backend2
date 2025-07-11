@@ -1,6 +1,6 @@
 import { Router } from "express";
 import {bookASlot, deleteParking, editParkingLot, 
-    getAvailableSpace, getListOfParkingLot, getParkingLotbyId,
+    getAvailableSpace, getListOfParkingLot, getLotBookingById, getLotBookingList, getParkingLotbyId,
     lotCheckOut,
     registerParkingLot} from "../controllers/merchant.parkinglot.controller.js"
 import { imageUpload } from "../middleware/upload.middleware.js";
@@ -19,6 +19,8 @@ merchantRouter.delete("/parkinglot/delete/:id",deleteParking);
 merchantRouter.get("/parkinglot/getavailable" ,getAvailableSpace);
 merchantRouter.post("/parkinglot/checkout", lotCheckOut)
 merchantRouter.post("/parkinglot/book", imageUploadFields,bookASlot);
+merchantRouter.get("/parkinglot/booking", getLotBookingList)
+merchantRouter.get("/parkinglot/booking/:id", getLotBookingById)
 merchantRouter.get("/parkinglot/search",getListOfParkingLot) ;
 merchantRouter.get("/parkinglot/:id",getParkingLotbyId);
 
@@ -29,7 +31,7 @@ merchantRouter.get("/garage/getavailable",getAvailableGarageSlots) ;
 merchantRouter.post("/garage/book",imageUploadFields, bookGarageSlot) ;
 merchantRouter.get("/garage/search", getListOfGarage) ;
 merchantRouter.post("/garage/checkout",checkoutGarageSlot) ;
-merchantRouter.get("/garage/bookinglist", garageBookingList);
+merchantRouter.get("/garage/booking", garageBookingList);
 merchantRouter.get("/garage/booking/:id", garageBookingInfo);
 merchantRouter.get("/garage/:id", getGarageDetails) ;
 

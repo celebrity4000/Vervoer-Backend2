@@ -7,8 +7,12 @@ import { Driver, IDriver } from "../models/driver.model.js";
 import { IMerchant, Merchant } from "../models/merchant.model.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
+type MUserRes = mongoose.Document<mongoose.Types.ObjectId , {}, IUser> & IUser ;
+type MMerchentRes = mongoose.Document<mongoose.Types.ObjectId , {}, IMerchant> & IUser ;
+type MDriverRes = mongoose.Document<mongoose.Types.ObjectId , {}, IDriver> & IUser ;
+type VerifyAuthReturn = {user : MUserRes , userType : "user"} | {user : MMerchentRes , userType : "merchant"} | {user : MDriverRes, userType : "driver"}
 
-export async function verifyAuthentication(req: Request) {
+export async function verifyAuthentication(req: Request):Promise<VerifyAuthReturn> {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) {
@@ -31,20 +35,20 @@ export async function verifyAuthentication(req: Request) {
 
     switch (decode.userType) {
       case "user":
-        const fUser: mongoose.Document<mongoose.Types.ObjectId , {},IUser> & IUser| null = await User.findById(decode.userId);
+        const fUser: MUserRes| null = await User.findById(decode.userId);
         if (!fUser) {
           throw new ApiError(401, "UNKNOWN_USER");
         }
         return { user: fUser, userType: "user" };
 
       case "driver":
-        const dUser: mongoose.Document<mongoose.Types.ObjectId , {},IDriver> & IDriver| null = await Driver.findById(decode.userId);
+        const dUser: MDriverRes| null = await Driver.findById(decode.userId);
         if (!dUser) {
           throw new ApiError(401, "UNKNOWN_USER");
         }
         return { user: dUser, userType: "driver" };
       case "merchant":
-        const mUser: mongoose.Document<mongoose.Types.ObjectId , {},IMerchant> & IMerchant| null = await Merchant.findById(decode.userId);
+        const mUser: MMerchentRes| null = await Merchant.findById(decode.userId);
         if (!mUser) {
           throw new ApiError(401, "UNKNOWN_USER");
         }

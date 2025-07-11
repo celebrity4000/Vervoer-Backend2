@@ -82,7 +82,33 @@ const BookingData = z.object({
 export const registerGarage = asyncHandler(
   async (req: Request, res: Response) => {
     try {
-      const rData = GarageData.parse(req.body);
+      // Create a mutable copy of req.body to parse stringified JSON fields
+      const requestBody = { ...req.body };
+
+      // Manually parse fields that are sent as stringified JSON from FormData
+      if (typeof requestBody.location === 'string') {
+        requestBody.location = JSON.parse(requestBody.location);
+      }
+      if (typeof requestBody.generalAvailable === 'string') {
+        requestBody.generalAvailable = JSON.parse(requestBody.generalAvailable);
+      }
+      if (requestBody.emergencyContact && typeof requestBody.emergencyContact === 'string') {
+        requestBody.emergencyContact = JSON.parse(requestBody.emergencyContact);
+      }
+      if (typeof requestBody.spacesList === 'string') {
+        requestBody.spacesList = JSON.parse(requestBody.spacesList);
+      }
+
+      // Also ensure boolean and number types are correctly coerced if they arrive as strings
+      if (typeof requestBody.is24x7 === 'string') {
+          requestBody.is24x7 = requestBody.is24x7 === 'true';
+      }
+      if (typeof requestBody.price === 'string') {
+          requestBody.price = parseFloat(requestBody.price);
+      }
+
+      const rData = GarageData.parse(requestBody); // Pass the parsed object to Zod
+
       const verifiedAuth = await verifyAuthentication(req);
 
       if (verifiedAuth?.userType !== "merchant") {
@@ -98,13 +124,15 @@ export const registerGarage = asyncHandler(
       let imageURL: string[] = [];
 
       if (req.files) {
-        if (Array.isArray(req.files)) {
+        // req.files will contain the actual file buffers if multer is set up correctly
+        // and frontend sends 'multipart/form-data'
+        if (Array.isArray(req.files)) { // This handles if 'images' is not explicitly named in frontend data.append
           imageURL = await Promise.all(
             req.files.map((file) => uploadToCloudinary(file.buffer))
           ).then((e) => e.map((e) => e.secure_url));
-        } else if (req.files.images) {
+        } else if (req.files.images) { // This handles if 'images' is explicitly named (recommended from frontend)
           imageURL = await Promise.all(
-            req.files.images.map((file: any) =>
+            (req.files.images as Express.Multer.File[]).map((file: Express.Multer.File) =>
               uploadToCloudinary(file.buffer)
             )
           ).then((e) => e.map((e) => e.secure_url));
@@ -113,7 +141,7 @@ export const registerGarage = asyncHandler(
 
       const newGarage = await Garage.create({
         owner: owner._id,
-        images: imageURL,
+        images: imageURL, // Only new images on registration
         ...rData
       });
 
@@ -137,12 +165,35 @@ export const registerGarage = asyncHandler(
 /**
  * Edit an existing garage
  */
-
 export const editGarage = asyncHandler(async (req: Request, res: Response) => {
   try {
     const garageId = z.string().parse(req.params.id);
 
-    const updateData = GarageData.partial().parse(req.body);
+    // Create a mutable copy of req.body to parse stringified JSON fields
+    const requestBody = { ...req.body };
+
+    // Manually parse fields that are sent as stringified JSON from FormData
+    if (typeof requestBody.location === 'string') {
+      requestBody.location = JSON.parse(requestBody.location);
+    }
+    if (typeof requestBody.generalAvailable === 'string') {
+      requestBody.generalAvailable = JSON.parse(requestBody.generalAvailable);
+    }
+    if (requestBody.emergencyContact && typeof requestBody.emergencyContact === 'string') {
+      requestBody.emergencyContact = JSON.parse(requestBody.emergencyContact);
+    }
+    if (typeof requestBody.spacesList === 'string') {
+      requestBody.spacesList = JSON.parse(requestBody.spacesList);
+    }
+    // Also ensure boolean and number types are correctly coerced if they arrive as strings
+    if (typeof requestBody.is24x7 === 'string') {
+        requestBody.is24x7 = requestBody.is24x7 === 'true';
+    }
+    if (typeof requestBody.price === 'string') {
+        requestBody.price = parseFloat(requestBody.price);
+    }
+
+    const updateData = GarageData.partial().parse(requestBody); // Pass the parsed object to Zod
 
     const verifiedAuth = await verifyAuthentication(req);
     if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
@@ -156,22 +207,46 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
       throw new ApiError(403, "UNAUTHORIZED_ACCESS");
     }
 
-    let imageURL: string[] = [];
+    let newlyUploadedImageURLs: string[] = [];
     if (req.files) {
       if (Array.isArray(req.files)) {
-        imageURL = await Promise.all(
+        newlyUploadedImageURLs = await Promise.all(
           req.files.map((file) => uploadToCloudinary(file.buffer))
         ).then((results) => results.map((r) => r.secure_url));
       } else if (req.files.images) {
-        imageURL = await Promise.all(
-          req.files.images.map((file: any) => uploadToCloudinary(file.buffer))
+        newlyUploadedImageURLs = await Promise.all(
+          (req.files.images as Express.Multer.File[]).map((file: Express.Multer.File) => uploadToCloudinary(file.buffer))
         ).then((results) => results.map((r) => r.secure_url));
       }
     }
 
-    if (imageURL.length > 0) {
-      updateData.images = [...garage.images, ...imageURL];
+    let finalImages: string[] = [];
+
+    // Start with existing images from the garage model
+    // This is the source of truth for currently stored images on Cloudinary
+    finalImages = [...garage.images];
+
+    // Handle existing image URLs sent from frontend (these are URLs already on Cloudinary)
+    if (requestBody.existingImages && typeof requestBody.existingImages === 'string') {
+      const existingImagesFromFrontend: string[] = JSON.parse(requestBody.existingImages);
+      // Filter the backend's current images to only keep those that the frontend explicitly sent back
+      // This implicitly handles image removal if the frontend removes an existing image and doesn't send its URL.
+      finalImages = finalImages.filter(url => existingImagesFromFrontend.includes(url));
+    } else {
+        // If 'existingImages' is not sent or is empty from the frontend, it implies either:
+        // 1. All previous images are removed (if frontend explicitly clears them)
+        // 2. Or, for some reason, the frontend didn't send them, in which case we might default to keeping all current.
+        // For robust behavior, it's better if frontend always sends the full desired list of existing URLs.
+        // If frontend sends an empty array in existingImages, this else block won't be hit, and finalImages will correctly become empty after filtering.
     }
+
+    // Add newly uploaded images to the final list
+    if (newlyUploadedImageURLs.length > 0) {
+      finalImages = [...new Set([...finalImages, ...newlyUploadedImageURLs])]; // Use Set to avoid duplicates
+    }
+
+    // Assign the combined images to updateData
+    updateData.images = finalImages;
 
     const updatedGarage = await Garage.findByIdAndUpdate(
       garageId,
@@ -604,6 +679,7 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
         address: booking.garageId.address,
         contactNumber: booking.garageId.contactNumber
       },
+      type : "G",
       customer: {
         _id: booking.customerId._id,
         name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
@@ -714,16 +790,16 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
       garage: {
-        _id: booking.garageId._id,
-        name: booking.garageId.garageName,
-        address: booking.garageId.address,
-        contactNumber: booking.garageId.contactNumber
+        _id: booking.garageId?._id,
+        name: booking.garageId?.garageName,
+        address: booking.garageId?.address,
+        contactNumber: booking.garageId?.contactNumber
       },
       customer: {
-        _id: booking.customerId._id,
-        name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
-        email: booking.customerId.email,
-        phone: booking.customerId.phoneNumber
+        _id: booking.customerId?._id,
+        name: `${booking.customerId?.firstName} ${booking.customerId?.lastName || ''}`.trim(),
+        email: booking.customerId?.email,
+        phone: booking.customerId?.phoneNumber
       },
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
@@ -738,6 +814,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
         paidAt : booking.paymentDetails.paidAt ,
       },
       status: booking.paymentDetails.status,
+      type : "G" ,
     }));
 
     res.status(200).json(new ApiResponse(200, {

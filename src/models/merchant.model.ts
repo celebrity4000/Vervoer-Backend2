@@ -193,7 +193,7 @@ const lotRentRecordSchema = new mongoose.Schema<ILotRecord , mongoose.Model<ILot
   },
   renterInfo: {
     type: mongoose.Schema.Types.ObjectId,
-    // ref : "User"
+    ref : "User"
   },
   rentedSlot: {
     type: String, // Zone + Number
