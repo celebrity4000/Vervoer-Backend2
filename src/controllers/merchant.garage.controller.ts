@@ -50,7 +50,12 @@ const GarageData = z.object({
       price: z.number().min(0),
     })
   ).optional(),
-
+  parking_pass: z.coerce.boolean().optional(),
+transportationAvailable: z.coerce.boolean().optional(),
+  transportationTypes: z.array(z.string()).optional(),
+  coveredDrivewayAvailable: z.coerce.boolean().optional(),
+  coveredDrivewayTypes: z.array(z.string()).optional(),
+  securityCamera: z.coerce.boolean().optional(),
 });
 
 const CheckoutData = z.object({
@@ -93,6 +98,7 @@ export const registerGarage = asyncHandler(
       if (typeof requestBody.generalAvailable === 'string') {
         requestBody.generalAvailable = JSON.parse(requestBody.generalAvailable);
       }
+      
       if (requestBody.emergencyContact && typeof requestBody.emergencyContact === 'string') {
         requestBody.emergencyContact = JSON.parse(requestBody.emergencyContact);
       }
@@ -100,38 +106,53 @@ export const registerGarage = asyncHandler(
         requestBody.spacesList = JSON.parse(requestBody.spacesList);
       }
 
+      //  Also parse stringified arrays for newly added fields
+      if (requestBody.transportationTypes && typeof requestBody.transportationTypes === 'string') {
+        requestBody.transportationTypes = JSON.parse(requestBody.transportationTypes);
+      }
+      if (requestBody.coveredDrivewayTypes && typeof requestBody.coveredDrivewayTypes === 'string') {
+        requestBody.coveredDrivewayTypes = JSON.parse(requestBody.coveredDrivewayTypes);
+      }
+
       // Also ensure boolean and number types are correctly coerced if they arrive as strings
       if (typeof requestBody.is24x7 === 'string') {
-          requestBody.is24x7 = requestBody.is24x7 === 'true';
+        requestBody.is24x7 = requestBody.is24x7 === 'true';
       }
       if (typeof requestBody.price === 'string') {
-          requestBody.price = parseFloat(requestBody.price);
+        requestBody.price = parseFloat(requestBody.price);
+      }
+      if (typeof requestBody.transportationAvailable === 'string') {
+        requestBody.transportationAvailable = requestBody.transportationAvailable === 'true';
+      }
+      if (typeof requestBody.coveredDrivewayAvailable === 'string') {
+        requestBody.coveredDrivewayAvailable = requestBody.coveredDrivewayAvailable === 'true';
+      }
+      if (typeof requestBody.securityCamera === 'string') {
+        requestBody.securityCamera = requestBody.securityCamera === 'true';
       }
 
-      const rData = GarageData.parse(requestBody); // Pass the parsed object to Zod
+      //  Validate full request with Zod
+      const rData = GarageData.parse(requestBody);
 
       const verifiedAuth = await verifyAuthentication(req);
-
       if (verifiedAuth?.userType !== "merchant") {
         throw new ApiError(400, "INVALID_USER");
       }
 
       const owner = verifiedAuth.user;
-
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
 
+      // Upload images to Cloudinary if present
       let imageURL: string[] = [];
 
       if (req.files) {
-        // req.files will contain the actual file buffers if multer is set up correctly
-        // and frontend sends 'multipart/form-data'
-        if (Array.isArray(req.files)) { // This handles if 'images' is not explicitly named in frontend data.append
+        if (Array.isArray(req.files)) {
           imageURL = await Promise.all(
             req.files.map((file) => uploadToCloudinary(file.buffer))
           ).then((e) => e.map((e) => e.secure_url));
-        } else if (req.files.images) { // This handles if 'images' is explicitly named (recommended from frontend)
+        } else if (req.files.images) {
           imageURL = await Promise.all(
             (req.files.images as Express.Multer.File[]).map((file: Express.Multer.File) =>
               uploadToCloudinary(file.buffer)
@@ -140,12 +161,14 @@ export const registerGarage = asyncHandler(
         }
       }
 
+      // Create new Garage record with all fields
       const newGarage = await Garage.create({
         owner: owner._id,
-        images: imageURL, // Only new images on registration
+        images: imageURL,
         ...rData
       });
 
+      // Update Merchant document to mark they now have a garage
       await mongoose.model("Merchant").findByIdAndUpdate(owner._id, {
         haveGarage: true
       });
@@ -156,11 +179,12 @@ export const registerGarage = asyncHandler(
         console.log(err.issues);
         throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
       }
-      console.log(err) ;
+      console.log(err);
       throw err;
     }
   }
 );
+
 
 
 /**
@@ -577,29 +601,28 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
 
 export const deleteGarage = asyncHandler(async (req, res) => {
   try {
-    const garageId = z.string().parse(req.params.id);  // <-- fixed here
-
+    // Fix: Use req.params.id instead of req.query.id for URL parameter
+    const garageId = z.string().parse(req.params.id);
     const authUser = await verifyAuthentication(req);
-    if (!authUser?.user || authUser.userType !== "merchant")
-      throw new ApiError(403, "UNAUTHORIZED_ACCESS");
-
-    const del = await Garage.findOneAndDelete({  // <-- added await here
+    if (!authUser?.user || authUser.userType !== "merchant") throw new ApiError(403, "UNAUTHORIZED_ACCESS")
+    
+    // Fix: Add await to actually execute the deletion
+    const del = await Garage.findOneAndDelete({
       _id: garageId,
-      owner: authUser.user,
+      owner: authUser?.user
     });
-
+    
     if (!del) {
       if (await Garage.findById(garageId)) throw new ApiError(403, "ACCESS_DENIED");
       throw new ApiError(404, "NOT_FOUND");
+    } else {
+      res.status(200).json(new ApiResponse(200, del));
     }
-
-    res.status(200).json(new ApiResponse(200, del, "Garage deleted successfully"));
   } catch (error) {
     if (error instanceof z.ZodError) throw new ApiError(400, "INVALID_DATA");
     throw error;
   }
 });
-
 
 export const getListOfGarage = asyncHandler(async (req, res) => {
   try {
