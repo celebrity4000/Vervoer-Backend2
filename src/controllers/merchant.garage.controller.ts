@@ -577,7 +577,7 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
 
 export const deleteGarage = asyncHandler(async (req, res) => {
   try {
-    const garageId = z.string().parse(req.params.id);  // <-- fixed here
+    const garageId = z.string().parse(req.query.id);  // <-- fixed here
 
     const authUser = await verifyAuthentication(req);
     if (!authUser?.user || authUser.userType !== "merchant")
