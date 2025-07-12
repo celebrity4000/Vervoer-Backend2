@@ -18,7 +18,7 @@ router.post("/verify-otp", asyncHandler(verifyOtp));
 router.post("/login", loginUser);
 router.post("/logout", authenticate, logoutUser);
 router.post("/forgot-password", sendForgotPasswordOtp);
-router.post("/verify-forgot-password-otp", verifyForgotPasswordOtp);
+// router.post("/verify-forgot-password-otp", verifyForgotPasswordOtp);
 router.post("/reset-password", resetForgottenPassword);
 router.put("/update-bank-details", authenticate, updateBankDetails);
 

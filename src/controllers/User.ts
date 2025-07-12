@@ -353,8 +353,7 @@ const getUserModel = (type: string): mongoose.Model<any> => {
 };
 
 //  Send OTP to email
-export const sendForgotPasswordOtp = async (req: Request, res: Response, next: NextFunction) => {
-  try {
+export const sendForgotPasswordOtp = asyncHandler( async (req: Request, res: Response, next: NextFunction) => {
     const { email, userType } = forgotPasswordSchema.parse(req.body);
     const UserModel = getUserModel(userType);
 
@@ -362,33 +361,25 @@ export const sendForgotPasswordOtp = async (req: Request, res: Response, next: N
     if (!user) {
       throw new ApiError(404, "User not found");
     }
-
     const otp = generateOTP();
     const otpExpiry = getOtpExpiry();
-
-    user.otp = otp;
-    user.otpExpiry = otpExpiry;
-    await user.save();
-
-    await sendEmail(email, "Password Reset OTP", `Your OTP is: ${otp}`);
+    if(!user.otpExpiry||  !user.otp ||  new Date(user.otpExpiry) <= new Date()){
+      console.log("Genrated OTP:" ,otp)
+      user.otp = otp;
+      user.otpExpiry = otpExpiry;
+      await user.save();
+    }
+    console.log("The OTP is:", user.otp);
+    await sendEmail(email, "Password Reset OTP", `Your OTP is: ${user.otp}`);
 
     res.status(200).json({ success: true, message: "OTP sent to email" });
-  } catch (error) {
-    next(error);
-  }
-};
+});
 
 // Verify OTP
-export const verifyForgotPasswordOtp = async (req: Request, res: Response, next: NextFunction) => {
+export const verifyForgotPasswordOtp =(req: Request,user :any) => {
   try {
     const { email, otp, userType } = verifyOtpSchema.parse(req.body);
-    const UserModel = getUserModel(userType);
-
-    const user = await UserModel.findOne({ email });
-    if (!user) {
-      throw new ApiError(404, "User not found");
-    }
-
+    console.log(user.otp , otp)
     if (user.otp !== otp) {
       throw new ApiError(400, "Invalid OTP");
     }
@@ -397,37 +388,40 @@ export const verifyForgotPasswordOtp = async (req: Request, res: Response, next:
       throw new ApiError(400, "OTP expired");
     }
 
-    user.otp = undefined;
-    user.otpExpiry = undefined;
+    user.otp = null;
+    user.otpExpiry = null;
     user.isVerified = true;
-    await user.save();
-
-    res.status(200).json({ success: true, message: "OTP verified successfully" });
+    return ;
+    // res.status(200).json({ success: true, message: "OTP verified successfully" });
   } catch (error) {
-    next(error);
+    throw error
   }
 };
 
 // Reset Password
-export const resetForgottenPassword = async (req: Request, res: Response, next: NextFunction) => {
+export const resetForgottenPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { email, password, confirmPassword, userType } = resetPasswordSchema.parse(req.body);
+    const { email, password, userType } = resetPasswordSchema.parse(req.body);
     const UserModel = getUserModel(userType);
 
     const user = await UserModel.findOne({ email });
     if (!user) {
       throw new ApiError(404, "User not found");
     }
+    verifyForgotPasswordOtp(req,user)
 
     const hashedPassword = await bcrypt.hash(password, 10);
     user.password = hashedPassword;
+
     await user.save();
     const newToken = jwtEncode({ userId: user._id, userType });
+    console.log("Successful")
     res.status(200).json({ success: true, message: "Password reset successfully" });
   } catch (error) {
-    next(error);
+    console.log(error)
+    throw error
   }
-};
+});
 
 
 // bank details

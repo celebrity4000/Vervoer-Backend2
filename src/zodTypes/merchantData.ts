@@ -40,7 +40,7 @@ export const ParkingData = z.object({
 
 export const BookingData = z.object({
     bookingId : z.string() ,
-    carLicensePlateImage: z.string().min(1, "Car license plate image string is required"),
+    vehicleNumber: z.string().min(1, "Car license plate image string is required"),
 
 })
 export type BookingData = z.infer<typeof BookingData> 

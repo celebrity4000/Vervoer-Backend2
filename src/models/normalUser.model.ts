@@ -15,7 +15,7 @@ export interface IUser extends Document {
   otpExpiry?: Date;
   isVerified: boolean;
   stripeCustomerId? : string
-  carLicensePlateImage?: string;
+  vehicleNumber?: string;
    bankDetails?: {
     accountNumber?: string;
     ifscCode?: string;
@@ -28,7 +28,7 @@ export interface IUser extends Document {
 const UserSchema = new Schema(
   {
     ...UserBaseSchemaFields,
-    carLicensePlateImage: { type: String,},
+    vehicleNumber: { type: String,},
     bankDetails: BankDetailsSchema,
   },
   { timestamps: true }
