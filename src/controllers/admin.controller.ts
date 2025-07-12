@@ -1,4 +1,4 @@
-import { Request, Response , NextFunction} from "express";
+import { Request, Response } from "express";
 import { ApiError } from "../utils/apierror.js";
 import { ApiResponse } from "../utils/apirespone.js";
 import jwt from "jsonwebtoken";
@@ -12,7 +12,7 @@ import { z } from "zod";
 import { Garage, GarageBooking } from "../models/merchant.garage.model.js";
 import { ParkingLotModel } from "../models/merchant.model.js";
 import mongoose from "mongoose";
-import { request } from "http";
+import { LotRentRecordModel } from "../models/merchant.model.js";
 
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
@@ -352,3 +352,19 @@ export const adminDeleteParking = asyncHandler(async (req, res) => {
     } else throw error;
   }
 });
+
+export const adminGetBookingsByParkingLot = asyncHandler(async (req: Request, res: Response) => {
+  
+  const lotId = z.string().min(10).parse(req.params.id); 
+
+  const bookings = await LotRentRecordModel.find({ lotId }).sort({ rentFrom: -1 });
+
+  if (!bookings || bookings.length === 0) {
+    throw new ApiError(404, "No bookings found for this parking lot.");
+  }
+
+  res.status(200).json(new ApiResponse(200, bookings, "Bookings fetched successfully."));
+});
+
+
+
