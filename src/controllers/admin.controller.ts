@@ -79,7 +79,7 @@ export const verifyAdminOtp = (req: Request, res: Response) => {
 };
 
 export const getAllUsers = async (req: Request, res: Response) => {
-   const users = await User.find({}, "firstName email phoneNumber carLicensePlateImage");
+   const users = await User.find({}, "firstName email phoneNumber vehicleNumber");
 
   res.status(200).json(
     new ApiResponse(200, { users }, "Fetched all user data")

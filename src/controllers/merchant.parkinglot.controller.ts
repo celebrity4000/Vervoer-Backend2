@@ -416,14 +416,14 @@ export const bookASlot = asyncHandler(async (req, res) => {
 
     const rData = BookingData.partial().parse(req.body);
 
-    // const { carLicensePlateImage } = rData;
-    // if (!carLicensePlateImage || typeof carLicensePlateImage !== "string") {
-    //   throw new ApiError(400, "Car license plate image string is required");
-    // }
+    const { vehicleNumber } = rData;
+    if (!vehicleNumber || typeof vehicleNumber !== "string") {
+      throw new ApiError(400, "Car license plate image string is required");
+    }
 
-    // const normalUser = vUser.user as IUser;
-    // normalUser.carLicensePlateImage = carLicensePlateImage;
-    // await normalUser.save();
+    const normalUser = vUser.user as IUser;
+    normalUser.vehicleNumber = vehicleNumber;
+    await normalUser.save();
 
     const rentRecord = await LotRentRecordModel.findById(rData.bookingId) ;
     if (!rentRecord) throw new ApiError(400, "Invalid bookingId");

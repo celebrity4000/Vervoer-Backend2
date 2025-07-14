@@ -778,7 +778,9 @@ export const garageBookingList = asyncHandler(async (req, res) => {
       // For merchants, show bookings for their garages
       if (garageId) {
         // Verify the garage belongs to the merchant
-        const garage = await Garage.findOne({ _id: garageId, owner: verifiedAuth.user._id });
+        const garage = await Garage.findOne({ _id: garageId, owner: verifiedAuth.user._id } , {}, {
+          
+        });
         if (!garage) {
           throw new ApiError(404, 'GARAGE_NOT_FOUND_OR_ACCESS_DENIED');
         }
@@ -794,7 +796,6 @@ export const garageBookingList = asyncHandler(async (req, res) => {
             pagination: {
               total: 0,
               page,
-              totalPages: 0,
               size: limit
             }
           }));
@@ -805,13 +806,10 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     } else {
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
-
-    // Get total count for pagination
-    const total = await GarageBooking.countDocuments(query);
-    const totalPages = Math.ceil(total / limit);
+    query.paymentDetails = {status : {$ne : "PENDING"}};
     console.log("query at garage: ", query);
     // Get paginated bookings with related data
-    const bookings = await GarageBooking.find({$and :[query , {"paymentDetails.status" : {$ne : "PENDING"}}]})
+    const bookings = await GarageBooking.find(query)
       .populate<{garageId : IGarage &{owner:IMerchant}}>({
         path :'garageId', 
         select : 'garageName address contactNumber _id owner',
@@ -820,8 +818,8 @@ export const garageBookingList = asyncHandler(async (req, res) => {
           model : Merchant,
           select :"firstName lastName email phoneNumber _id"
         }
-      }).orFail()
-      .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id').orFail()
+      })
+      .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id')
       .sort({ createdAt: -1 }) // Most recent first
       .skip(skip)
       .limit(limit)
@@ -862,9 +860,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, {
       bookings: formattedBookings,
       pagination: {
-        total,
         page,
-        totalPages,
         size: limit
       }
     }));
