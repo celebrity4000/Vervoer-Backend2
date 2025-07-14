@@ -6,7 +6,7 @@ import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../cont
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {registerDriver,} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot} from "../controllers/admin.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence} from "../controllers/admin.controller.js";
 import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.parkinglot.controller.js";
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
@@ -54,7 +54,7 @@ router.delete(
 );
 router.get("/dry-cleaner", authenticate, getAllDryCleaners);
 router.post("/place-order/:dryCleanerId", authenticate, placeOrderToDryCleaner);
-
+ 
 // Driver registration route
 router.post("/register-driver", imageUploadFields, registerDriver);
 // user booking route
@@ -82,6 +82,7 @@ router.get("/admin/get-parking-lot/:id", isAdmin, getParkingLotbyId);
 router.get("/admin/get-list-of-parking-lots", isAdmin, getListOfParkingLot);
 router.delete("/admin/delete-parking-lot/:id", isAdmin, adminDeleteParking);
 router.get("/admin/get-bookings-by-parking-lot/:id", isAdmin, adminGetBookingsByParkingLot);
+router.delete("/admin/delete-residence/:id", isAdmin, adminDeleteResidence);
 
 
 // Payment gateway route

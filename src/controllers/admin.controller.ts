@@ -13,6 +13,7 @@ import { Garage, GarageBooking } from "../models/merchant.garage.model.js";
 import { ParkingLotModel } from "../models/merchant.model.js";
 import mongoose from "mongoose";
 import { LotRentRecordModel } from "../models/merchant.model.js";
+import { ResidenceModel } from "../models/merchant.residence.model.js";
 
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
@@ -367,4 +368,15 @@ export const adminGetBookingsByParkingLot = asyncHandler(async (req: Request, re
 });
 
 
+export const adminDeleteResidence = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
 
+  const residence = await ResidenceModel.findById(id);
+  if (!residence) {
+    throw new ApiError(404, "Residence not found");
+  }
+
+  await residence.deleteOne();
+
+  res.status(200).json(new ApiResponse(200, null, "Residence deleted successfully"));
+});
