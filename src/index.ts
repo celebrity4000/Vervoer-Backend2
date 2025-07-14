@@ -18,7 +18,8 @@ const httpServer = createServer(app);
 
 // CORS middleware here ⬇️
 app.use(cors({
-  origin: "http://localhost:5173", 
+  origin: ["http://localhost:5173", "https://admin-self-seven-79.vercel.app"],
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true
 }));
 
