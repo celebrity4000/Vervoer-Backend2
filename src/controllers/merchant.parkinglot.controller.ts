@@ -28,9 +28,7 @@ export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
     //TODO: verify merchant account
     try {
-      console.log("REQBODY: ",req.body)
       const verifiedAuth = await verifyAuthentication(req) ;
-      console.log(verifiedAuth)
       let owner = null ;
       if(verifiedAuth?.userType !== "merchant") {
         throw new ApiError(400, "INVALID_USER") ;
@@ -416,13 +414,13 @@ export const bookASlot = asyncHandler(async (req, res) => {
 
     const rData = BookingData.partial().parse(req.body);
 
-    const { vehicleNumber } = rData;
-    if (!vehicleNumber || typeof vehicleNumber !== "string") {
+    const { carLicensePlateImage } = rData;
+    if (!carLicensePlateImage || typeof carLicensePlateImage !== "string") {
       throw new ApiError(400, "Car license plate image string is required");
     }
 
     const normalUser = vUser.user as IUser;
-    normalUser.vehicleNumber = vehicleNumber;
+    normalUser.carLicensePlateImage = carLicensePlateImage;
     await normalUser.save();
 
     const rentRecord = await LotRentRecordModel.findById(rData.bookingId) ;
@@ -555,7 +553,7 @@ export const getLotBookingById = asyncHandler(async (req: Request, res: Response
         totalHours: booking.totalHours
       },
       type : "L",
-      // vehicleNumber: booking.vehicleNumber, // TODO: add vehicleNumber
+      // carLicensePlateImage: booking.carLicensePlateImage, // TODO: add carLicensePlateImage
       bookedSlot: booking.rentedSlot,
       priceRate: booking.priceRate,
       paymentDetails: {
@@ -567,8 +565,8 @@ export const getLotBookingById = asyncHandler(async (req: Request, res: Response
         paidAt: booking.paymentDetails.paidAt,
       },
       status: booking.paymentDetails.status,
-      createdAt: booking.createdAt,
-      updatedAt: booking.updatedAt
+      // createdAt: booking.createdAt,
+      // updatedAt: booking.updatedAt
     };
 
     res.status(200).json(
@@ -659,7 +657,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         to: booking.rentTo,
         totalHours: booking.totalHours
       },
-      // vehicleNumber: booking.vehicleNumber, // TODO
+      // carLicensePlateImage: booking.carLicensePlateImage, // TODO
       bookedSlot: booking.rentedSlot,
       priceRate: booking.priceRate,
       paymentDetails: {
@@ -671,7 +669,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         paidAt: booking.paymentDetails.paidAt,
       },
       status: booking.paymentDetails.status,
-      createdAt: booking.createdAt
+      // createdAt: booking.createdAt
     }));
     console.log("formatedBooking",formattedBookings);
     res.status(200).json(
