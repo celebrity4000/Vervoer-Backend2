@@ -39,7 +39,7 @@ app.use("/api/merchants", merchantRouter);
 app.get("/api/getStripePublicKey", (req,res)=>{res.status(200).json(new ApiResponse(200,{key : StripePublicKey}))})
 
 app.get("/", (req: Request, res: Response) => {
-  res.status(200).send("Welcome To Vervoer");
+  res.status(200).send("Welcome To Vervoer Backend API");
 });
 
 connectDB()
