@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtp,resetForgottenPassword,updateBankDetails} from "../controllers/User.js";  
+import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails} from "../controllers/User.js";  
 import { asyncHandler } from "../utils/asynchandler.js";
 import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
 import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../controllers/driverBooking.controller.js";
@@ -19,8 +19,9 @@ router.post("/verify-otp", asyncHandler(verifyOtp));
 router.post("/login", loginUser);
 router.post("/logout", authenticate, logoutUser);
 router.post("/forgot-password", sendForgotPasswordOtp);
-// router.post("/verify-forgot-password-otp", verifyForgotPasswordOtp);
+router.post("/verify-forgot-otp", verifyForgotPasswordOtpHandler);
 router.post("/reset-password", resetForgottenPassword);
+
 router.put("/update-bank-details", authenticate, updateBankDetails);
 
 

@@ -346,6 +346,13 @@ export const resetPasswordSchema = z.object({
 });
 
 
+export const verifyForgotPasswordOtpSchema = z.object({
+  email: z.string().email(),
+  otp: z.string().length(6),
+  userType: z.enum(["user", "merchant", "driver"]),
+});
+
+
 const getUserModel = (type: string): mongoose.Model<any> => {
   if (type === "merchant") return Merchant;
   if (type === "driver") return Driver;
@@ -376,51 +383,57 @@ export const sendForgotPasswordOtp = asyncHandler( async (req: Request, res: Res
 });
 
 // Verify OTP
-export const verifyForgotPasswordOtp =(req: Request,user :any) => {
-  try {
-    const { email, otp, userType } = verifyOtpSchema.parse(req.body);
-    console.log(user.otp , otp)
-    if (user.otp !== otp) {
-      throw new ApiError(400, "Invalid OTP");
-    }
 
-    if (user.otpExpiry && user.otpExpiry < new Date()) {
-      throw new ApiError(400, "OTP expired");
-    }
 
-    user.otp = null;
-    user.otpExpiry = null;
-    user.isVerified = true;
-    return ;
-    // res.status(200).json({ success: true, message: "OTP verified successfully" });
-  } catch (error) {
-    throw error
+
+export const verifyForgotPasswordOtpHandler = asyncHandler(async (req: Request, res: Response) => {
+  const { email, otp, userType } = verifyForgotPasswordOtpSchema.parse(req.body);
+  
+  const UserModel = getUserModel(userType);
+  const user = await UserModel.findOne({ email });
+  
+  if (!user) {
+    throw new ApiError(404, "User not found");
   }
-};
-
+  
+  if (user.otp !== otp) {
+    throw new ApiError(400, "Invalid OTP");
+  }
+  
+  if (user.otpExpiry && user.otpExpiry < new Date()) {
+    throw new ApiError(400, "OTP expired");
+  }
+  
+  user.otp = null;
+  user.otpExpiry = null;
+  user.isVerified = true;
+  await user.save();
+  
+  res.status(200).json({ success: true, message: "OTP verified successfully" });
+});
 // Reset Password
-export const resetForgottenPassword = asyncHandler(async (req: Request, res: Response, next: NextFunction) => {
-  try {
-    const { email, password, userType } = resetPasswordSchema.parse(req.body);
-    const UserModel = getUserModel(userType);
+export const resetForgottenPassword = asyncHandler(async (req: Request, res: Response) => {
+  const { email, password, userType, confirmPassword } = resetPasswordSchema.parse(req.body);
 
-    const user = await UserModel.findOne({ email });
-    if (!user) {
-      throw new ApiError(404, "User not found");
-    }
-    verifyForgotPasswordOtp(req,user)
+  const UserModel = getUserModel(userType);
+  const user = await UserModel.findOne({ email });
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-    user.password = hashedPassword;
-
-    await user.save();
-    const newToken = jwtEncode({ userId: user._id, userType });
-    console.log("Successful")
-    res.status(200).json({ success: true, message: "Password reset successfully" });
-  } catch (error) {
-    console.log(error)
-    throw error
+  if (!user) {
+    throw new ApiError(404, "User not found");
   }
+
+  if (!user.isVerified) {
+    throw new ApiError(403, "OTP verification required before resetting password");
+  }
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  user.password = hashedPassword;
+  user.isVerified = false; 
+
+  await user.save();
+
+  const newToken = jwtEncode({ userId: user._id, userType });
+  res.status(200).json({ success: true, message: "Password reset successfully" });
 });
 
 

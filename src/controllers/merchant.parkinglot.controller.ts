@@ -26,7 +26,6 @@ type MUserRes = mongoose.Document<mongoose.Types.ObjectId , {}, IUser> & IUser ;
 
 export const registerParkingLot = asyncHandler(
   async (req: Request, res: Response) => {
-    //TODO: verify merchant account
     try {
       const verifiedAuth = await verifyAuthentication(req) ;
       let owner = null ;
@@ -37,7 +36,21 @@ export const registerParkingLot = asyncHandler(
       if (!owner) {
         throw new ApiError(400, "UNKNOWN_USER");
       }
-      const rData = ParkingData.parse(req.body);
+
+      // --- FIX START ---
+      // Parse JSON strings back to objects/arrays before Zod validation
+      if (typeof req.body.gpsLocation === 'string') {
+        req.body.gpsLocation = JSON.parse(req.body.gpsLocation);
+      }
+      if (typeof req.body.spacesList === 'string') {
+        req.body.spacesList = JSON.parse(req.body.spacesList);
+      }
+      if (typeof req.body.generalAvailable === 'string') {
+        req.body.generalAvailable = JSON.parse(req.body.generalAvailable);
+      }
+      // --- FIX END ---
+
+      const rData = ParkingData.parse(req.body); // Now ParkingData.parse will receive the correct types
       let imageURL: string[] = [] ;
       if(req.files){
         if(Array.isArray(req.files)){
@@ -68,7 +81,21 @@ export const registerParkingLot = asyncHandler(
 export const editParkingLot = asyncHandler(async (req: Request, res: Response) => {
   try {
     const parkingLotId = z.string().parse(req.params.id);
-    const updateData = ParkingData.partial().parse(req.body);
+
+    // --- FIX START ---
+    // Parse JSON strings back to objects/arrays before Zod validation
+    if (typeof req.body.gpsLocation === 'string') {
+      req.body.gpsLocation = JSON.parse(req.body.gpsLocation);
+    }
+    if (typeof req.body.spacesList === 'string') {
+      req.body.spacesList = JSON.parse(req.body.spacesList);
+    }
+    if (typeof req.body.generalAvailable === 'string') {
+      req.body.generalAvailable = JSON.parse(req.body.generalAvailable);
+    }
+    // --- FIX END ---
+
+    const updateData = ParkingData.partial().parse(req.body); // Now ParkingData.partial().parse will receive the correct types
     const verifiedAuth = await verifyAuthentication(req);
 
     if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
@@ -87,15 +114,23 @@ export const editParkingLot = asyncHandler(async (req: Request, res: Response) =
 
     // Update the parking lot with new data
     let imageURL: string[] = [] ;
-      if(req.files){
-        if(Array.isArray(req.files)){
-          imageURL = await Promise.all(req.files.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url)) ;
-        }
-        else {
-          imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
-        }
+    if(req.files){
+      if(Array.isArray(req.files)){
+        imageURL = await Promise.all(req.files.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url)) ;
       }
-    if(imageURL.length > 0) updateData.images = [...parkingLot.images, ...imageURL] ;
+      else {
+        imageURL = await Promise.all(req.files.images.map((file)=>uploadToCloudinary(file.buffer))).then(res => res.map(e=>e.secure_url))
+      }
+    }
+    if(imageURL.length > 0) {
+      // Ensure you're merging existing images if not re-uploaded
+      updateData.images = [...(parkingLot.images || []), ...imageURL];
+    } else {
+      // If no new images are uploaded, retain existing ones.
+      // This logic might need refinement if you want to allow deletion of images.
+      // For now, it just adds new ones or keeps old ones if no new ones are provided.
+      updateData.images = parkingLot.images;
+    }
     const updatedParkingLot = await ParkingLotModel.findByIdAndUpdate(
       parkingLotId,
       { $set: updateData },
