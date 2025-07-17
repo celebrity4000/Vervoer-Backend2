@@ -14,6 +14,10 @@ import axios from "axios";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { BlacklistedToken } from "../models/blacklistedToken.model.js";
 import { BankDetailsSchema } from "../models/bankDetails.model.js";
+import { ApiResponse } from "../utils/apirespone.js";
+import  uploadToCloudinary  from "../utils/cloudinary.js";
+import { ZodError } from "zod";
+
 // import 
 import mongoose from "mongoose";
 
@@ -467,3 +471,133 @@ export const updateBankDetails = asyncHandler(
     });
   }
 );
+
+
+// reset password
+const resetPasswordSchemaUser= z.object({
+  currentPassword: z.string().min(6),
+  newPassword: z.string().min(6),
+  confirmNewPassword: z.string().min(6),
+});
+
+export const resetUserPassword = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const { user, userType } = await verifyAuthentication(req);
+
+    const { currentPassword, newPassword, confirmNewPassword } =
+      resetPasswordSchemaUser.parse(req.body);
+
+    if (newPassword !== confirmNewPassword) {
+      throw new ApiError(400, "NEW_PASSWORDS_DO_NOT_MATCH");
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+
+    if (!isMatch) {
+      throw new ApiError(400, "CURRENT_PASSWORD_IS_INCORRECT");
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+
+    await user.save();
+
+    res.status(200).json(
+      new ApiResponse(200, null, "Password updated successfully.")
+    );
+  }
+);
+
+// profile pic
+
+const imageUploadSchema = z.object({});
+
+export const uploadProfileImage = asyncHandler(async (req: Request, res: Response) => {
+  const user = req.authUser?.user;
+
+  if (!user) {
+    res.status(401).json({ success: false, message: "Unauthorized user" });
+    return;
+  }
+
+  if (!req.files || !('profileImage' in req.files)) {
+    res.status(400).json({ success: false, message: "No profile image uploaded" });
+    return;
+  }
+
+  const file = (req.files as { [fieldname: string]: Express.Multer.File[] })['profileImage'][0];
+
+  const result = await uploadToCloudinary(file.buffer);
+
+  user.profileImage = result.secure_url;
+  await user.save();
+
+  res.status(200).json(
+    new ApiResponse(200, user, "Profile image uploaded successfully")
+  );
+});
+
+
+// edit profile 
+const partialEditSchema = z.object({
+  firstName: z.string().optional(),
+  lastName: z.string().optional(),
+  phoneNumber: z.string().min(10).optional(),
+  country: z.string().optional(),
+  state: z.string().optional(),
+  zipCode: z.string().optional(),
+});
+
+export const editUserProfile = asyncHandler(async (req: Request) => {
+  const userId = (req.authUser?.user as any)?._id;
+
+  if (!userId) {
+    throw new ApiError(401, "Unauthorized user");
+  }
+
+  const validatedData = partialEditSchema.parse(req.body);
+
+  const updateFields: any = { ...validatedData };
+
+  if (req.files && "profileImage" in req.files) {
+    const file = (req.files as { [key: string]: Express.Multer.File[] })["profileImage"]?.[0];
+    if (file) {
+      const result = await uploadToCloudinary(file.buffer);
+      updateFields.profileImage = result.secure_url;
+    }
+  }
+
+  if (Object.keys(updateFields).length === 0) {
+    throw new ApiError(400, "No valid fields provided for update");
+  }
+
+  const updatedUser = await User.findByIdAndUpdate(userId, { $set: updateFields }, { new: true });
+
+  if (!updatedUser) {
+    throw new ApiError(404, "User not found");
+  }
+
+  return new ApiResponse(200, updatedUser, "Profile updated successfully");
+});
+
+export const getUserProfile = asyncHandler(async (req: Request, res: Response) => {
+  const userId = (req.authUser?.user as any)?._id;
+
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Unauthorized user" });
+    return;
+  }
+
+  const user = await User.findById(userId).select(
+    "firstName lastName email phoneNumber country state zipCode profileImage"
+  );
+
+  if (!user) {
+    res.status(404).json({ success: false, message: "User not found" });
+    return;
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, user, "User profile fetched successfully")
+  );
+});

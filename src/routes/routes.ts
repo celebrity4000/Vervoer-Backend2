@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails} from "../controllers/User.js";  
+import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails,resetUserPassword, uploadProfileImage, editUserProfile, getUserProfile} from "../controllers/User.js";  
 import { asyncHandler } from "../utils/asynchandler.js";
 import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
 import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../controllers/driverBooking.controller.js";
@@ -21,6 +21,21 @@ router.post("/logout", authenticate, logoutUser);
 router.post("/forgot-password", sendForgotPasswordOtp);
 router.post("/verify-forgot-otp", verifyForgotPasswordOtpHandler);
 router.post("/reset-password", resetForgottenPassword);
+router.put("/reset-user-password", authenticate, resetUserPassword);
+router.put(
+  "/upload-profile-image",
+  authenticate,
+  imageUploadFields,
+  uploadProfileImage
+);
+router.put(
+  "/edit-profile",
+  authenticate,
+  imageUploadFields, 
+  editUserProfile
+);
+router.get("/get-profile", authenticate, getUserProfile);
+
 
 router.put("/update-bank-details", authenticate, updateBankDetails);
 

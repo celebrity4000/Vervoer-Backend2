@@ -21,6 +21,7 @@ export interface IMerchant extends Document {
   haveParkingLot: boolean;
   haveResidenceParking: boolean;
   bankDetails?: IBankDetails;
+  profileImage?: string;
   stripeCustomerId?:string ;
 }
 

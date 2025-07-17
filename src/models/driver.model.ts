@@ -16,6 +16,7 @@ export interface IDriver extends Document {
   isVerified: boolean;
   loginType: string;
   socialId?: string;
+  profileImage?: string;
 
   isBooked?: boolean;
   middleName: string;

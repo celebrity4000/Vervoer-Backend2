@@ -11,6 +11,7 @@ export const UserBaseSchemaFields = {
   otp: { type: String },
   otpExpiry: { type: Date },
   isVerified: { type: Boolean, default: false },
+  profileImage: { type: String },
   stripeCustomerId : String ,
   loginType: {
     type: String,

@@ -36,6 +36,8 @@ export const imageUploadFields = imageUpload.fields([
   { name: "driveProfileImage", maxCount: 1} ,
   { name: "electronicSignature", maxCount: 1 },
   { name: "carLicensePlateImage", maxCount: 1 },
+  { name: "profileImage", maxCount: 1 },
+
 ]);
 
 ;
