@@ -17,9 +17,9 @@ import { BankDetailsSchema } from "../models/bankDetails.model.js";
 import { ApiResponse } from "../utils/apirespone.js";
 import  uploadToCloudinary  from "../utils/cloudinary.js";
 import { ZodError } from "zod";
+import mongoose , {Model} from "mongoose";
 
 // import 
-import mongoose from "mongoose";
 
 export const registerUser = async (
   req: Request,
@@ -601,3 +601,50 @@ export const getUserProfile = asyncHandler(async (req: Request, res: Response) =
     new ApiResponse(200, user, "User profile fetched successfully")
   );
 });
+
+
+
+const deleteAccountSchema = z.object({
+  email: z.string().email("Invalid email address"),
+});
+
+export const deleteAccount = asyncHandler(
+  async (req: Request, res: Response, next: NextFunction) => {
+    const { email } = deleteAccountSchema.parse(req.body);
+
+    if (!req.authUser) {
+      throw new ApiError(401, "UNAUTHORIZED_REQUEST");
+    }
+
+    const { user, userType } = req.authUser;
+    const userId = user._id;
+
+    let ModelToUse: Model<any>; // <-- fix type here
+
+    if (userType === "merchant") {
+      ModelToUse = Merchant;
+    } else if (userType === "driver") {
+      ModelToUse = Driver;
+    } else {
+      ModelToUse = User;
+    }
+
+    const foundUser = await ModelToUse.findById(userId);
+    if (!foundUser) {
+      throw new ApiError(404, "USER_NOT_FOUND");
+    }
+
+    if (foundUser.email !== email) {
+      throw new ApiError(400, "EMAIL_DOES_NOT_MATCH");
+    }
+
+    await foundUser.deleteOne();
+
+    res.status(200).json(
+      new ApiResponse(200, null, "Account deleted successfully")
+    );
+  }
+);
+
+
+
