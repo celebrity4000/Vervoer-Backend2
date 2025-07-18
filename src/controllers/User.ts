@@ -538,7 +538,36 @@ export const uploadProfileImage = asyncHandler(async (req: Request, res: Respons
 });
 
 
-// edit profile 
+
+
+export const getUserProfile = asyncHandler(async (req: Request, res: Response) => {
+  const userId = req.authUser?.user?._id;
+  const userType = req.authUser?.userType;
+
+  if (!userId) {
+    res.status(401).json({ success: false, message: "Unauthorized user" });
+    return;
+  }
+
+  let user: any = null;
+
+  if (userType === 'user') {
+    user = await User.findById(userId).select("firstName lastName email phoneNumber country state zipCode profileImage");
+  } else if (userType === 'merchant') {
+    user = await Merchant.findById(userId).select("firstName lastName email phoneNumber profileImage country state zipCode");
+  } else if (userType === 'driver') {
+    user = await Driver.findById(userId).select("firstName lastName email phoneNumber profileImage country state zipCode");
+  }
+
+  if (!user) {
+    res.status(404).json({ success: false, message: "User not found" });
+    return;
+  }
+
+  res.status(200).json(new ApiResponse(200, user, "User profile fetched successfully"));
+});
+
+
 const partialEditSchema = z.object({
   firstName: z.string().optional(),
   lastName: z.string().optional(),
@@ -550,14 +579,15 @@ const partialEditSchema = z.object({
 
 export const editUserProfile = asyncHandler(async (req: Request) => {
   const userId = (req.authUser?.user as any)?._id;
+  const userType = req.authUser?.userType;
 
-  if (!userId) {
+  if (!userId || !userType) {
     throw new ApiError(401, "Unauthorized user");
   }
 
+  // Validate incoming fields
   const validatedData = partialEditSchema.parse(req.body);
-
-  const updateFields: any = { ...validatedData };
+  const updateFields: Record<string, any> = { ...validatedData };
 
   if (req.files && "profileImage" in req.files) {
     const file = (req.files as { [key: string]: Express.Multer.File[] })["profileImage"]?.[0];
@@ -571,35 +601,22 @@ export const editUserProfile = asyncHandler(async (req: Request) => {
     throw new ApiError(400, "No valid fields provided for update");
   }
 
-  const updatedUser = await User.findByIdAndUpdate(userId, { $set: updateFields }, { new: true });
+  let ModelToUpdate: Model<any>;
+  if (userType === "merchant") ModelToUpdate = Merchant;
+  else if (userType === "driver") ModelToUpdate = Driver;
+  else ModelToUpdate = User;
+
+  const updatedUser = await ModelToUpdate.findByIdAndUpdate(
+    userId,
+    { $set: updateFields },
+    { new: true }
+  ).select("firstName lastName email phoneNumber country state zipCode profileImage userType");
 
   if (!updatedUser) {
     throw new ApiError(404, "User not found");
   }
 
   return new ApiResponse(200, updatedUser, "Profile updated successfully");
-});
-
-export const getUserProfile = asyncHandler(async (req: Request, res: Response) => {
-  const userId = (req.authUser?.user as any)?._id;
-
-  if (!userId) {
-    res.status(401).json({ success: false, message: "Unauthorized user" });
-    return;
-  }
-
-  const user = await User.findById(userId).select(
-    "firstName lastName email phoneNumber country state zipCode profileImage"
-  );
-
-  if (!user) {
-    res.status(404).json({ success: false, message: "User not found" });
-    return;
-  }
-
-  res.status(200).json(
-    new ApiResponse(200, user, "User profile fetched successfully")
-  );
 });
 
 
