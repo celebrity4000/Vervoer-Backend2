@@ -10,6 +10,8 @@ export interface IResident {
   price: number;
   contactNumber: string;
   email?: string;
+  
+  vehicleType: "bike" | "car" | "both";
   generalAvailable: [
     {
       day: "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
@@ -55,6 +57,12 @@ const residenceSchema = new mongoose.Schema<
     },
     email: {
       type: String,
+    },
+    vehicleType: {
+      type: String,
+      enum: ["bike", "car", "both"],
+      required: true,
+      default: "both"
     },
     // totalSlot : {
     //   type : Number ,

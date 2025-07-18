@@ -21,6 +21,7 @@ export const ParkingData = z.object({
   images: z.array(z.url()).optional(),
   contactNumber: z.string().nonempty(),
   gpsLocation: gpsLocationSchema,
+  vehicleType: z.enum(['bike', 'car', 'both']),
   spacesList: z.record(
     z.string().regex(/^[A-Z]{1,3}$/),
     z.object({
@@ -64,6 +65,7 @@ export const residenceSchema = z.object({
   address: z.string().min(10),
   gpsLocation: gpsLocationSchema,
   price: z.coerce.number().positive(),
+  vehicleType: z.enum(['bike', 'car', 'both']),
   about: z.string().min(20),
   generalAvailable: z.array(availableDaySchema).optional(),
   is24x7: z.coerce.boolean().optional(),

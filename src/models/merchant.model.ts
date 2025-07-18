@@ -63,6 +63,7 @@ export interface IParking {
     closeTime? : string ,
     is24Hours : boolean ,
   }],
+  vehicleType: "bike" | "car" | "both";
   is24x7 : boolean,
   isActive: boolean,
 }
@@ -78,6 +79,12 @@ const parkingLotSchema = new mongoose.Schema<IParking,mongoose.Model<IParking> ,
     contactNumber : {
       type : String ,
       required : true
+    },
+    vehicleType: {
+      type: String,
+      enum: ["bike", "car", "both"],
+      required: true,
+      default: "both"
     },
     email : {
       type : String ,

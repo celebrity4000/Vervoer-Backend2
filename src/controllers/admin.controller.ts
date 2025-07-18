@@ -380,3 +380,4 @@ export const adminDeleteResidence = asyncHandler(async (req: Request, res: Respo
 
   res.status(200).json(new ApiResponse(200, null, "Residence deleted successfully"));
 });
+
