@@ -806,7 +806,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     } else {
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
-    query.paymentDetails = {status : {$ne : "PENDING"}};
+    query["paymentDetails.status"] = {$ne : "PENDING"};
     console.log("query at garage: ", query);
     // Get paginated bookings with related data
     const bookings = await GarageBooking.find(query)
