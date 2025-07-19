@@ -11,6 +11,7 @@ import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
+import { getCurrentSession } from "../controllers/merchant.controller.js";
 const router = Router();
 
 // User routes
@@ -72,7 +73,7 @@ router.delete(
 );
 router.get("/dry-cleaner", authenticate, getAllDryCleaners);
 router.post("/place-order/:dryCleanerId", authenticate, placeOrderToDryCleaner);
- 
+
 // Driver registration route
 router.post("/register-driver", imageUploadFields, registerDriver);
 // user booking route
@@ -108,6 +109,7 @@ router.post("/create-payment", authenticate, createPayment);
 
 router.post("/social-register", socialRegister);
 
+router.get("/current-session", getCurrentSession);
 // query route
 router.post("/submit-query", authenticate, submitQueryToAdmin);
 export default router;
