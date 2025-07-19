@@ -430,7 +430,7 @@ export const lotCheckOut = asyncHandler(async (req,res)=>{
     //   "paymentDetails.status" : "PENDING" ,
     // })
     
-    const data = await createABooking(rData,lot,USER) ;
+    const data = await createABooking(rData,lot as any,USER) ;
 
     res.status(200).json(new ApiResponse(201,data)) ;
 
