@@ -583,7 +583,7 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
   try {
     const garageId = z.string().parse(req.params.id);
     
-    const garage = await Garage.findById(garageId);
+    const garage = await Garage.findById(garageId).populate<{owner :IMerchant}>("owner" , "-password -otp -otpExpire");
     if (!garage) {
       throw new ApiError(404, "GARAGE_NOT_FOUND");
     }
