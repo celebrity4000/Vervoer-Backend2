@@ -328,7 +328,7 @@ const updateACheckout = async ( data : LotCheckOutData, lotDoc : MParkingRes, bo
       stripeDetails : updateInfo.paymentDetails.stripePaymentDetails ,
   }
 }
-const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes , user : MUserRes)=>{
+const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes & {owner : IMerchant} , user : MUserRes)=>{
   const bookingFrom = new Date(data.bookingPeriod.from) ;
   const bookingTo = new Date(data.bookingPeriod.to) ;
   const slotId = generateParkingSpaceID(data.bookedSlot.zone , data.bookedSlot.slot.toString()) ;
@@ -342,7 +342,7 @@ const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes , use
     throw new ApiError(400, "SLOT NOT AVAILABLE")
   }
   
-  const totalHours =Math.floor(( bookingTo.getTime() - bookingFrom.getTime())/(1000*60*60) );
+  const totalHours =( bookingTo.getTime() - bookingFrom.getTime())/(1000*60*60);
   const rate = lotDoc.price ;
   let discountPercentage = 0 ;//Float
   if(data.couponCode){
@@ -351,14 +351,15 @@ const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes , use
   
   const totalAmount = totalHours*rate ;
   const discount = totalAmount*discountPercentage ;
-  
+  const platformCharge = totalAmount*0.1 ;
+
   let stripeCustomerId = user.stripeCustomerId ;
   if(!stripeCustomerId){
     stripeCustomerId = await createStripeCustomer(user.firstName+" " +user.lastName , user.email);
     const __user = await User.findByIdAndUpdate(user._id ,{stripeCustomerId}) ;
     if(!__user) throw new ApiError(500,"Server Error");
   }
-  const stripeDetails = await initPayment(totalAmount - discount, stripeCustomerId) ;
+  const stripeDetails = await initPayment(totalAmount+ platformCharge - discount, stripeCustomerId) ;
 
   const updateInfo = await LotRentRecordModel.create({
     lotId : lotDoc._id ,
@@ -369,12 +370,13 @@ const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes , use
     totalAmount : totalAmount ,
     totalHours : totalHours ,
     discount : discount ,
+    platformCharge,
     appliedCouponCode : discountPercentage > 0 && data.couponCode ,
     amountToPaid : totalAmount-discount ,
     priceRate : rate ,
     paymentDetails : {
       status : "PENDING",
-      amountPaidBy : totalAmount - discount ,
+      amountPaidBy : totalAmount+ platformCharge - discount ,
       stripePaymentDetails : stripeDetails,
       paymentMethod : "STRIPE"
     }
@@ -389,11 +391,19 @@ const createABooking = async (data : LotCheckOutData, lotDoc : MParkingRes , use
         priceRate : updateInfo.priceRate ,
         basePrice:updateInfo.totalAmount,
         discount: discount,
+        platformCharge,
         couponApplied: discount > 0,
         couponDetails: discount>0 ? data.couponCode : null,
         totalAmount: totalAmount
       },
       stripeDetails : updateInfo.paymentDetails.stripePaymentDetails ,
+      placeInfo : {
+        name : lotDoc.parkingName ,
+        phoneNo : lotDoc.contactNumber ,
+        owner : lotDoc.owner.firstName + " " + lotDoc.owner.lastName,
+        address :lotDoc.address,
+        location : lotDoc.gpsLocation,
+      }
   }
 }
 export const lotCheckOut = asyncHandler(async (req,res)=>{
@@ -410,7 +420,7 @@ export const lotCheckOut = asyncHandler(async (req,res)=>{
     const rData = LotCheckOutData.parse(req.body);
     console.log("Validation Succesfull req data is", rData)
     
-    const lot = await ParkingLotModel.findById(rData.lotId) ;
+    const lot = await ParkingLotModel.findById(rData.lotId).populate<{owner: IMerchant}>("owner", "-password") ;
     if(!lot){
       throw new ApiError(400,"NO LOT FOUND") ;
     }
@@ -595,6 +605,7 @@ export const getLotBookingById = asyncHandler(async (req: Request, res: Response
         totalAmount: booking.totalAmount,
         amountPaid: booking.amountToPaid,
         discount: booking.discount || 0,
+        platformCharge : booking.platformCharge,
         status: booking.paymentDetails.status,
         method: booking.paymentDetails.paymentMethod,
         paidAt: booking.paymentDetails.paidAt,
@@ -699,6 +710,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         totalAmount: booking.totalAmount,
         amountPaid: booking.amountToPaid,
         discount: booking.discount || 0,
+        platformCharge : booking.platformCharge,
         status: booking.paymentDetails.status,
         method: booking.paymentDetails.paymentMethod,
         paidAt: booking.paymentDetails.paidAt,

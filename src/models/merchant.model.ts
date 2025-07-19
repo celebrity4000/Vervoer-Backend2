@@ -184,6 +184,7 @@ export interface ILotRecord {
   priceRate : number ;
   amountToPaid: number;
   appliedCouponCode: string;
+  platformCharge : number;
   discount: number;
   paymentDetails: {
     transactionId: string | null;
@@ -216,6 +217,10 @@ const lotRentRecordSchema = new mongoose.Schema<ILotRecord , mongoose.Model<ILot
     required: true,
   },
   totalHours: {
+    type: Number,
+    required: true,
+  },
+  platformCharge: {
     type: Number,
     required: true,
   },

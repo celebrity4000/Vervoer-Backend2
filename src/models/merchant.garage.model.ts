@@ -162,6 +162,7 @@ interface IGarageBooking {
   bookedSlot: string;
   totalAmount: number;
   amountToPaid: number;
+  platformCharge: number;
   couponCode?: string;
   discount: number;
   priceRate: number;
@@ -187,6 +188,7 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
     bookedSlot: { type: String, required: true },
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
+    platformCharge: { type: Number, required: true, default:0 },
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },

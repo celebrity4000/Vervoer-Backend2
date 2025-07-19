@@ -26,7 +26,7 @@ export const initPayment = async (amount : number , customerId : string ,currenc
     {apiVersion: '2025-06-30.basil'}
   );
   const paymentIntent = await stripe.paymentIntents.create({
-    amount: amount,
+    amount: Math.round(amount*100),
     currency: currency,
     customer: customerId,
     // In the latest version of the API, specifying the `automatic_payment_methods` parameter

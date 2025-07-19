@@ -366,7 +366,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     const rData = CheckoutData.parse(req.body);
     console.log("Validation Succesfull req data is", rData)
     console.log("Verifying garage")
-    const garage = await Garage.findById(rData.garageId);
+    const garage = await Garage.findById(rData.garageId).populate<{owner : IMerchant }>("owner", "-password");
     if (!garage) {
       throw new ApiError(404, "GARAGE_NOT_FOUND");
     }
@@ -405,8 +405,10 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     // Apply coupon if provided
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate = new Date(rData.bookingPeriod.to);
-    const totalHours = Math.floor((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60));
+    const totalHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
     let totalAmount = totalHours * (selectedZone.price|| 0), discount = 0  ,couponApplied = false , couponDetails = null ;
+
+    const platformCharge = totalAmount*0.1 ;
     if (rData.couponCode) {
       // In a real application, you would validate the coupon here
       // This is a simplified example
@@ -416,7 +418,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       if (isValidCoupon) {
         // Example: 10% discount
         discount = totalAmount * 0.1;
-        totalAmount -= discount;
         couponApplied = true;
         couponDetails = {
           code: rData.couponCode,
@@ -431,7 +432,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       User.findByIdAndUpdate(verifiedAuth.user._id ,{stripeCustomerId}) ;
     }
 
-    const stripeDetals = await initPayment(totalAmount, stripeCustomerId) ;
+    const stripeDetals = await initPayment(totalAmount + platformCharge - discount, stripeCustomerId) ;
     // Update booking with payment and checkout details
     const booking = await GarageBooking.create({
       garageId: rData.garageId,
@@ -441,10 +442,11 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       vehicleNumber: rData.vehicleNumber,
       totalAmount : totalAmount +discount ,
       discount : discount ,
-      amountToPaid:  totalAmount,
+      amountToPaid:  totalAmount + platformCharge - discount,
+      platformCharge: platformCharge,
       priceRate : selectedZone.price ,
       paymentDetails: {
-        amount: totalAmount,
+        amount: totalAmount + platformCharge - discount,
         method: rData.paymentMethod,
         status: 'PENDING',
         transactionId: null,
@@ -468,11 +470,19 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         priceRate : selectedZone.price ,
         basePrice: totalHours * (selectedZone.price || 0),
         discount: discount,
+        platformCharge,
         couponApplied: couponApplied,
         couponDetails: couponApplied ? couponDetails : null,
-        totalAmount: totalAmount
+        totalAmount: totalAmount + platformCharge -discount
       },
       stripeDetails : booking.paymentDetails.StripePaymentDetails ,
+      placeInfo : {
+        name : garage.garageName ,
+        phoneNo : garage.contactNumber ,
+        owner : garage.owner.firstName + " "+ garage.owner.lastName ,
+        address : garage.address,
+        location : garage.location,
+      }
     };
 
     res.status(200).json(new ApiResponse(200, response));
@@ -730,8 +740,8 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
         discount: booking.discount,
         status: booking.paymentDetails.status,
         method: booking.paymentDetails.method,
-        paidAt : booking.paymentDetails.paidAt
-        
+        paidAt : booking.paymentDetails.paidAt,
+        platformCharge : booking.platformCharge,
       }
     };
 
@@ -852,6 +862,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
         status: booking.paymentDetails.status,
         method: booking.paymentDetails.method ,
         paidAt : booking.paymentDetails.paidAt ,
+        platformCharge : booking.platformCharge,
       },
       status: booking.paymentDetails.status,
       type : "G" ,
