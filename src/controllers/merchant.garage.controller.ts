@@ -11,6 +11,7 @@ import uploadToCloudinary from "../utils/cloudinary.js";
 import { IUser, User } from "../models/normalUser.model.js";
 import { createStripeCustomer, initPayment, verifyStripePayment } from "../utils/stripePayments.js";
 import { IMerchant, Merchant } from "../models/merchant.model.js";
+import QRCode from 'qrcode';
 
 // Zod schemas for validation
 const GarageData = z.object({
@@ -881,4 +882,78 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     throw error;
   }
 });
+
+export const scanBookingQRCode = asyncHandler(async (req: Request, res: Response) => {
+  const bookingId = req.params.id;
+
+  const verifiedAuth = await verifyAuthentication(req);
+  if (!verifiedAuth?.user) {
+    throw new ApiError(401, "Unauthorized");
+  }
+
+  const booking = await GarageBooking.findById(bookingId)
+    .populate({
+      path: "garageId",
+      select: "garageName address contactNumber owner",
+      populate: {
+        path: "owner",
+        model: Merchant,
+        select: "firstName lastName email phoneNumber",
+      },
+    })
+    .populate({
+      path: "customerId",
+      model: User,
+      select: "firstName lastName email phoneNumber",
+    });
+
+  if (!booking) {
+    throw new ApiError(404, "Booking not found");
+  }
+
+  const garage = booking.garageId as any;
+  const customer = booking.customerId as any;
+
+  const formattedData = {
+    _id: booking._id,
+    garage: {
+      _id: garage?._id,
+      name: garage?.garageName,
+      address: garage?.address,
+      contactNumber: garage?.contactNumber,
+      owner: {
+        _id: garage?.owner?._id,
+        name: `${garage?.owner?.firstName} ${garage?.owner?.lastName || ""}`.trim(),
+        email: garage?.owner?.email,
+        phone: garage?.owner?.phoneNumber,
+      },
+    },
+    customer: {
+      _id: customer?._id,
+      name: `${customer?.firstName} ${customer?.lastName || ""}`.trim(),
+      email: customer?.email,
+      phone: customer?.phoneNumber,
+    },
+    bookingPeriod: booking.bookingPeriod,
+    vehicleNumber: booking.vehicleNumber,
+    bookedSlot: booking.bookedSlot,
+    priceRate: booking.priceRate,
+    paymentDetails: {
+      totalAmount: booking.totalAmount,
+      amountPaid: booking.amountToPaid,
+      discount: booking.discount,
+      status: booking.paymentDetails.status,
+      method: booking.paymentDetails.method,
+      paidAt: booking.paymentDetails.paidAt,
+    },
+    status: booking.paymentDetails.status,
+    type: "G",
+  };
+
+  res.status(200).json(
+  new ApiResponse(200, formattedData, "Booking data fetched via QR successfully")
+);
+
+});
+
 
