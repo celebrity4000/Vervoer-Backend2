@@ -157,8 +157,9 @@ export const updateResidence = asyncHandler(async (req: Request, res: Response) 
 
 export const getResidenceById = asyncHandler(async (req: Request, res: Response) => {
   const { residenceId } = req.params;
-  const residence = await ResidenceModel.findById(residenceId).populate("owner", "username email phone").lean();
+  const residence = await ResidenceModel.findById(residenceId).populate("owner", "-password -otp -otpExpire").lean();
   if (!residence) throw new ApiError(404, "Residence not found");
+  console.log("Residence", residence);
   res.status(200).json(new ApiResponse(200, residence, "Residence retrieved successfully"));
 });
 
@@ -382,9 +383,9 @@ export const verifyResidenceBooking = asyncHandler(async(req,res)=>{
  
   let session: mongoose.ClientSession | undefined;
   try{
-
- const {bookingId , vehicleNumber} = req.body ;
- if(!(bookingId && vehicleNumber) )throw new ApiError(400,"NO_BOOKINGID")  ;
+    console.log("Verifying the booking")
+ const {bookingId , carLicensePlateImage} = req.body ;
+ if(!(bookingId && carLicensePlateImage ) )throw new ApiError(400,"NO_BOOKINGID")  ;
  const verifiedUser = await verifyAuthentication(req);
     
     if (!(verifiedUser?.userType === "user" )) {
@@ -410,7 +411,7 @@ export const verifyResidenceBooking = asyncHandler(async(req,res)=>{
     // Check for overlapping bookings
     const bookingFrom = new Date (booking.bookingPeriod.from) ;
     const bookingTo = new Date(booking.bookingPeriod.to);
-    const isBooking = await findBookedResidenceIn(bookingFrom,bookingTo) ;
+    const isBooking = await findBookedResidenceIn(bookingFrom,bookingTo,booking.residenceId.toString()) ;
     if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
       throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
     }
@@ -425,14 +426,15 @@ export const verifyResidenceBooking = asyncHandler(async(req,res)=>{
       await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
-    booking.vehicleNumber = vehicleNumber ;
+    booking.vehicleNumber = carLicensePlateImage ;
     booking.paymentDetails.status = "SUCCESS" ;
     booking.save() ;
     await session.commitTransaction();
     
     res.status(201).json(new ApiResponse(201, { booking: booking }));
   }catch(err){
-    
+    console.log(err);
+    throw err;
   }
 });
 
@@ -492,7 +494,7 @@ export const residenceBookingInfo = asyncHandler(async (req: Request, res: Respo
     // Find the booking and populate related data
     const booking = await ResidenceBookingModel.findById(bookingId)
       .populate<{residenceId : mongoose.MergeType<IResident,{owner : IMerchant}>}>({
-        path :'garageId',
+        path :'residenceId',
         populate : {
           path : "owner" ,
           model : Merchant,
@@ -506,8 +508,8 @@ export const residenceBookingInfo = asyncHandler(async (req: Request, res: Respo
       throw new ApiError(404, 'BOOKING_NOT_FOUND');
     }
 
-    // If neither the customer nor the garage owner, deny access
-    if (verifiedAuth.user._id !== booking.customerId._id && verifiedAuth.user._id !== booking.residenceId.owner._id ) {
+    // If neither the customer nor the residence owner, deny access
+    if (verifiedAuth.user._id.toString() !== booking.customerId._id.toString() && verifiedAuth.user._id.toString() !== booking.residenceId.owner._id.toString() ) {
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
 
@@ -551,12 +553,12 @@ export const residenceBookingInfo = asyncHandler(async (req: Request, res: Respo
 })
 
 /**
- * @description Get a paginated list of garage bookings
- * @route GET /api/merchants/garage/bookings
+ * @description Get a paginated list of residence bookings
+ * @route GET /api/merchants/residence/bookings
  * @queryParam page - Page number (default: 1)
  * @queryParam size - Number of items per page (default: 10)
- * @queryParam garageId - Optional garage ID (for merchants to filter by garage)
- * @access Private - Accessible by authenticated users (sees their own bookings) or merchants (sees their garage's bookings)
+ * @queryParam residenceId - Optional residence ID (for merchants to filter by residence)
+ * @access Private - Accessible by authenticated users (sees their own bookings) or merchants (sees their residence's bookings)
  */
 const BookingQueryParams = z.object({
   page : z.coerce.number().min(1).default(1),
@@ -583,22 +585,22 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
       // For regular users, only show their own bookings
       query.customerId = verifiedAuth.user._id;
     } else if (verifiedAuth.userType === 'merchant') {
-      // For merchants, show bookings for their garages
+      // For merchants, show bookings for their residences
       if (residenceId) {
-        // Verify the garage belongs to the merchant
-        const garage = await ResidenceModel.findOne({ _id: residenceId, owner: verifiedAuth.user._id } , {}, {
+        // Verify the residence belongs to the merchant
+        const residence = await ResidenceModel.findOne({ _id: residenceId, owner: verifiedAuth.user._id } , {}, {
           
         });
-        if (!garage) {
+        if (!residence) {
           throw new ApiError(404, 'Residence_NOT_FOUND_OR_ACCESS_DENIED');
         }
         query.residenceId = residenceId;
       } else {
-        // If no garageId provided, get all garages owned by the merchant
-        const merchantGarages = await ResidenceModel.find({ owner: verifiedAuth.user._id }, '_id');
-        const garageIds = merchantGarages.map(g => g._id);
-        if (garageIds.length === 0) {
-          // No garages found for this merchant
+        // If no residenceId provided, get all residences owned by the merchant
+        const merchantResidences = await ResidenceModel.find({ owner: verifiedAuth.user._id }, '_id');
+        const residenceIds = merchantResidences.map(g => g._id);
+        if (residenceIds.length === 0) {
+          // No residences found for this merchant
           res.status(200).json(new ApiResponse(200, {
             bookings: [],
             pagination: {
@@ -609,17 +611,17 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
           }));
           return ;
         }
-        query.garageId = { $in: garageIds };
+        query.residenceId = { $in: residenceIds };
       }
     } else {
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
     query["paymentDetails.status"] = {$ne : "PENDING"};
-    console.log("query at garage: ", query);
+    console.log("query at residence: ", query);
     // Get paginated bookings with related data
     const bookings = await ResidenceBookingModel.find(query)
       .populate<{residenceId : mongoose.MergeType<IResident,{owner : IMerchant}>}>({
-        path :'garageId',
+        path :'residenceId',
         populate : {
           path : "owner" ,
           model : Merchant,
@@ -633,7 +635,7 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
       .lean();
 
     // Format the response
-    console.log(bookings) ;
+    console.log("found Residence booking:", bookings.length) ;
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
       residence: {

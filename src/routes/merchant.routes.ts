@@ -40,11 +40,11 @@ merchantRouter.post("/residence/registration", imageUpload.array("images",10), a
 merchantRouter.put("/residence/update/:residenceId",imageUpload.array("images",10),updateResidence);
 merchantRouter.delete("/residence/delete/:residenceId",deleteResidence) ;
 merchantRouter.get("/residence/search",getListOfResidence) ;
-merchantRouter.get("/residence/:residenceId",getResidenceById) ;
 merchantRouter.post("/residence/book", verifyResidenceBooking) ;
 merchantRouter.post("/residence/checkout", checkoutResidence) ;
 merchantRouter.get("/residence/booking", residenceBookingList);
 merchantRouter.get("/residence/booking/:id",residenceBookingInfo);
 merchantRouter.delete("/residence/booking/:bookingId", deleteResidenceBooking);
+merchantRouter.get("/residence/:residenceId",getResidenceById) ;
 
 export default merchantRouter ;

@@ -301,8 +301,8 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
  */
 export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Response) => {
   try {
-    const startDate = z.iso.date().parse(req.query.startDate);
-    const endDate = z.iso.date().parse(req.query.endDate);
+    const startDate = z.iso.datetime().parse(req.query.startDate);
+    const endDate = z.iso.datetime().parse(req.query.endDate);
     const garageId = z.string().parse(req.query.garageId);
 
     const garage = await Garage.findById(garageId);
@@ -598,11 +598,8 @@ export const getGarageDetails = asyncHandler(async (req: Request, res: Response)
     if (!garage) {
       throw new ApiError(404, "GARAGE_NOT_FOUND");
     }
-
-    res.status(200).json(new ApiResponse(200, { 
-      garage,
-      isOpen: garage.isOpenNow()
-    }));
+    console.log("GARAGE FOUND");
+    res.status(200).json(new ApiResponse(200,garage));
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new ApiError(400, "INVALID_ID");
@@ -838,7 +835,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
       .lean();
 
     // Format the response
-    console.log(bookings) ;
+    console.log("found garage booking", bookings.length) ;
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
       garage: {
