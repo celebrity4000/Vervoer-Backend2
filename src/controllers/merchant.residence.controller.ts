@@ -598,7 +598,7 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
         const merchantGarages = await ResidenceModel.find({ owner: verifiedAuth.user._id }, '_id');
         const garageIds = merchantGarages.map(g => g._id);
         if (garageIds.length === 0) {
-
+          // No garages found for this merchant
           res.status(200).json(new ApiResponse(200, {
             bookings: [],
             pagination: {
