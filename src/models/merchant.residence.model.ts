@@ -1,7 +1,9 @@
 import mongoose from "mongoose";
 import { StripeIntentData } from "../utils/stripePayments.js";
+import { required } from "zod/v4-mini";
 
 export interface IResident {
+  _id: mongoose.Types.ObjectId
   owner: mongoose.Types.ObjectId;
   residenceName: string;
   about: string;
@@ -167,8 +169,8 @@ export interface IResidenceBooking {
     from: Date | string;
     to: Date | string;
   };
-  vehicleNumber: string;
-  bookedSlot: string;
+  vehicleNumber?: string;
+  platformCharge : number;
   totalAmount: number;
   amountToPaid: number;
   couponCode?: string;
@@ -177,7 +179,7 @@ export interface IResidenceBooking {
   paymentDetails: {
     transactionId?: string;
     amount: number;
-    method: "CASH" | "CREDIT" | "DEBIT" | "UPI" | "PAYPAL";
+    method: "CASH" | "CREDIT" | "DEBIT" | "UPI" | "STRIPE";
     status: "PENDING" | "SUCCESS" | "FAILED";
     paymentGateway: "CASH" | "STRIPE";
     paidAt: string | Date | null;
@@ -193,17 +195,17 @@ const residenceBookingSchema = new mongoose.Schema<IResidenceBooking>(
       from: { type: Date, required: true },
       to: { type: Date, required: true },
     },
-    vehicleNumber: { type: String, required: true },
-    bookedSlot: { type: String, required: true },
+    vehicleNumber: { type: String},
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
+    platformCharge: {type: Number, required : true , default:0},
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },
     paymentDetails: {
       transactionId: String,
       amount: Number,
-      method: { type: String, enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"], required: true },
+      method: { type: String, enum: ["CASH", "CREDIT", "DEBIT", "UPI", "STRIPE"], required: true },
       status: { type: String, enum: ["PENDING", "SUCCESS", "FAILED"], default: "PENDING" },
       paymentGateway: { type: String, enum: ["CASH", "STRIPE"], default: "STRIPE" },
       paidAt: Date,

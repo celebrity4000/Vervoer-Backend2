@@ -563,6 +563,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     if(existingBookings ){
       booking.paymentDetails.status = "FAILED" ;
       await booking.save();
+      // TODO: Refund Logic
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
     booking.paymentDetails.status = "SUCCESS" ;

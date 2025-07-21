@@ -1,14 +1,19 @@
 import { Request, Response } from "express";
-import { Merchant } from "../models/merchant.model.js";
-import { IResident, ResidenceModel ,ResidenceBookingModel} from "../models/merchant.residence.model.js";
+import { Merchant,IMerchant } from "../models/merchant.model.js";
+import { IResident, ResidenceModel ,ResidenceBookingModel, IResidenceBooking} from "../models/merchant.residence.model.js";
 import { ApiError } from "../utils/apierror.js";
 import { ApiResponse } from "../utils/apirespone.js";
 import { asyncHandler } from "../utils/asynchandler.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { residenceSchema, updateResidenceSchema, type ResidenceData } from "../zodTypes/merchantData.js";
-import z from "zod";
+import z from "zod/v4";
 import mongoose from "mongoose";
+import { createStripeCustomer, initPayment, StripeIntentData, verifyStripePayment } from "../utils/stripePayments.js";
+import { User,IUser } from "../models/normalUser.model.js";
+
+type MUserRes = mongoose.Document<mongoose.Types.ObjectId , {}, IUser> & IUser ;
+type MResidenceRes = mongoose.Document<mongoose.Types.ObjectId , {}, IResident> & IResident ;
 
 export const addResidence = asyncHandler(async (req: Request, res: Response) => {
   // Auth check
@@ -179,12 +184,42 @@ export const getMerchantResidences = asyncHandler(async (req: Request, res: Resp
   res.status(200).json(new ApiResponse(200, residences, "Residences retrieved successfully"));
 });
 
+async function findBookedResidenceIn(startDate : Date , endDate: Date , id? : string ){
+  let q: mongoose.FilterQuery<IResidenceBooking> = {};
+  if(id) q._id = id ;
+  if(startDate < endDate){
+    return await ResidenceBookingModel.find({
+      ...q,
+      "paymentDetails.status" : "SUCCESS" ,
+      $or : [{
+      "bookingPeriod.from" : {
+        $gte : startDate , $lt : endDate ,
+      }},
+      {
+        "bookingPeriod.to" : {
+          $lt : endDate , $gte : startDate
+        }
+      },{
+        "bookingPeriod.from" : {$lte : startDate},
+        "bookingPeriod.to" : {$gte : endDate} ,
+    }]
+    })
+  }
+  return [] ;
+}
+const ResidenceQuery = z.object({
+  longitude : z.coerce.number() ,
+  latitude : z.coerce.number(),
+  owner : z.string(),
+  startDate : z.iso.datetime(),
+  endDate : z.iso.datetime(),
+  vehicleType : z.enum(["car","bike" , "both"]) ,
+}).partial()
 export const getListOfResidence = asyncHandler(async (req, res) => {
   try {
-    const longitude = z.coerce.number().optional().parse(req.query.longitude);
-    const latitude = z.coerce.number().optional().parse(req.query.latitude);
-    const owner = z.string().optional().parse(req.query.owner);
-
+    const {
+      longitude, latitude, owner, startDate , endDate , vehicleType
+    } = ResidenceQuery.parse(req.query)
     const queries: mongoose.FilterQuery<IResident> = {};
     if (longitude && latitude) {
       queries.gpsLocation = {
@@ -193,7 +228,15 @@ export const getListOfResidence = asyncHandler(async (req, res) => {
         }
       };
     }
+    if(vehicleType && vehicleType !== "both"){
+      queries.vehicleType = {$in : [vehicleType , "both"]}
+    }
+
     if (owner) queries.owner = owner;
+
+    if(startDate && endDate && startDate < endDate){
+      queries._id = {$nin : (await findBookedResidenceIn(new Date(startDate), new Date(endDate))).map((e)=>e._id)} 
+    }
 
     const result = await ResidenceModel.find(queries).exec();
     if (!result) throw new ApiError(500);
@@ -207,83 +250,433 @@ export const getListOfResidence = asyncHandler(async (req, res) => {
   }
 });
 
-
-export const createResidenceBooking = asyncHandler(async (req: Request, res: Response) => {
-  const verifiedAuth = await verifyAuthentication(req);
-
-  if (verifiedAuth?.userType !== "user") {
-    throw new ApiError(403, "Only customers can book residences");
+const CheckOutResidenceData = z.object({
+  residenceId : z.string(),
+  bookingPeriod : z.object({to:z.iso.datetime() , from : z.iso.datetime()}) ,
+  couponCode: z.string().optional() ,
+})
+interface CBookingData{
+bookingPeriod : {to:Date , from:Date};
+totalAmount : number ;
+amountToPaid: number;
+couponCode?:string;
+discount:number ;
+platformCharge : number ;
+}
+async function createABooking(data : CBookingData, stripeDetails : StripeIntentData &{customerId :string} , user :MUserRes , residence: mongoose.Document<mongoose.Types.ObjectId,{},mongoose.MergeType<IResident,{owner:IMerchant}>> & Omit<IResident,"owner">&{owner :IMerchant}) {
+  const booking = await ResidenceBookingModel.create({
+    residenceId: residence._id ,
+    customerId : user._id ,
+    ...data,    
+    priceRate : residence.price ,
+    paymentDetails:{
+      amount : data.amountToPaid,
+      paymentGateway:"STRIPE",
+      method:"STRIPE",
+      status:"PENDING",
+      StripePaymentDetails : stripeDetails
+    }
+  } as IResidenceBooking)
+  if(!booking){
+    throw new ApiError(400,"SERVER_ERROR: can't book ")
   }
-
-  const {
-    residenceId,
-    bookingPeriod,
-    vehicleNumber,
-    bookedSlot,
-    totalAmount,
-    amountToPaid,
-    couponCode,
-    discount,
-    priceRate,
-    paymentDetails
-  } = req.body;
-
-  // Basic validation
-  if (!residenceId || !bookingPeriod || !bookingPeriod.from || !bookingPeriod.to) {
-    throw new ApiError(400, "Missing required booking fields");
+  return {
+      bookingId: booking._id,
+      type:"R",
+      name: residence.residenceName,
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      pricing: {
+        priceRate : booking.priceRate ,
+        basePrice: booking.totalAmount,
+        discount: booking.discount,
+        platformCharge: booking.platformCharge,
+        couponApplied: booking.couponCode !== undefined,
+        couponDetails: booking.couponCode || null,
+        totalAmount: booking.amountToPaid
+      },
+      stripeDetails : booking.paymentDetails.StripePaymentDetails ,
+      placeInfo : {
+        name : residence.residenceName,
+        phoneNo : residence.contactNumber ,
+        owner : residence.owner.firstName + " " + residence.owner.lastName,
+        address : residence.address,
+        location :residence.gpsLocation ,
+      }
   }
+}
 
-  const newBooking = await ResidenceBookingModel.create({
-    residenceId,
-    customerId: verifiedAuth.user._id,
-    bookingPeriod,
-    vehicleNumber,
-    bookedSlot,
-    totalAmount,
-    amountToPaid,
-    couponCode,
-    discount,
-    priceRate,
-    paymentDetails
-  });
+export const checkoutResidence = asyncHandler(async (req,res)=>{
+  try{
 
-  res.status(201).json(new ApiResponse(201, newBooking, "Residence booking created successfully"));
+    const verifiedAuth = await verifyAuthentication(req);
+    
+    if (verifiedAuth?.userType !== "user" ) {
+      throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+    }
+    
+    const rData = CheckOutResidenceData.parse(req.body) ;
+    const sd = new Date(rData.bookingPeriod.from);
+    const ed = new Date(rData.bookingPeriod.to);
+
+    if(ed < sd) throw new ApiError(400, "WRONG_DATE") ;
+    const residence = await ResidenceModel.findById(rData.residenceId).populate<{owner : IMerchant}>("owner","-password") ;
+    if(!residence)throw new ApiError(400,"WRONG_RESIDENCE_ID");
+
+    const  isBooked = await findBookedResidenceIn(sd,ed,rData.residenceId)
+    if(isBooked.length !== 0){
+      throw new ApiError(400,"NOT_AVAILABLE");
+    }
+
+    const totalHours = (ed.getTime() - sd.getTime())/3600000
+    const totalAmount = totalHours*residence.price ;
+
+    let discount = 0 , platformCharge = 0 , amountPaid = totalAmount;
+    platformCharge = totalAmount*0.1 ;
+    if(rData.couponCode){
+      const dp = verifyCouponCode(rData.couponCode) ;
+      discount = totalAmount*dp ;
+    }
+    amountPaid = amountPaid+ platformCharge -discount 
+    let stripeCustomerId = ""
+    if(!verifiedAuth.user.stripeCustomerId){
+      stripeCustomerId = await createStripeCustomer(`${verifiedAuth.user.firstName} ${verifiedAuth.user.lastName}` , verifiedAuth.user.email)
+      try{
+
+        User.findByIdAndUpdate(verifiedAuth.user._id,{stripeCustomerId:stripeCustomerId}) ;
+      }catch(err){
+        console.log("Couldn't Update the stripe customer Id") ;
+      }
+    }else {
+      stripeCustomerId = verifiedAuth.user.stripeCustomerId;
+    }
+    
+    const paymentDetails = await initPayment(amountPaid,stripeCustomerId) ;
+    let response:any = await createABooking({
+      bookingPeriod: {to : ed , from :sd},
+      totalAmount,
+      discount,
+      couponCode : rData.couponCode,
+      amountToPaid:amountPaid,
+      platformCharge,
+    }, 
+    {...paymentDetails,customerId:stripeCustomerId},
+    verifiedAuth.user,residence
+  )
+  res.status(200).json(new ApiResponse(200,response));
+  }catch(err){
+    console.log(err)
+    if(err instanceof z.ZodError){
+      console.log(err.issues)
+      throw new ApiError(400,"INVALID_DATA") ;
+    }
+    throw err;
+  }
+})
+
+const verifyCouponCode = (c : string)=>{
+  return c.startsWith("XES")? 0.1 : 0;
+}
+
+export const verifyResidenceBooking = asyncHandler(async(req,res)=>{
+ 
+  let session: mongoose.ClientSession | undefined;
+  try{
+
+ const {bookingId , vehicleNumber} = req.body ;
+ if(!(bookingId && vehicleNumber) )throw new ApiError(400,"NO_BOOKINGID")  ;
+ const verifiedUser = await verifyAuthentication(req);
+    
+    if (!(verifiedUser?.userType === "user" )) {
+      throw new ApiError(401, "User must be a verified user");
+    }
+
+    const booking = await ResidenceBookingModel.findById(bookingId);
+    if (!booking) {
+      throw new ApiError(404, "Booking not found");
+    }
+    if(booking.customerId.toString() !== verifiedUser.user._id.toString()){
+      console.log("customerId:", booking.customerId);
+      console.log("userId:", verifiedUser.user._id);
+      throw new ApiError(401, "User is not authorized to book this slot");
+    }
+    // Start transaction
+    if(booking.paymentDetails?.status === "SUCCESS" && booking.paymentDetails.transactionId){
+      throw new ApiError(400, "USER ALREADY PAID AND BOOKED") ;
+    }
+    session = await mongoose.startSession();
+    session.startTransaction();
+
+    // Check for overlapping bookings
+    const bookingFrom = new Date (booking.bookingPeriod.from) ;
+    const bookingTo = new Date(booking.bookingPeriod.to);
+    const isBooking = await findBookedResidenceIn(bookingFrom,bookingTo) ;
+    if(!booking.paymentDetails.StripePaymentDetails?.paymentIntentId){
+      throw new ApiError(400,"NO STRIPE RECORD FOUND") ;
+    }
+
+    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId) ;
+    if(!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION")
+
+    booking.paymentDetails.paidAt = new Date()
+    if(isBooking.length > 0 ){
+      booking.paymentDetails.status = "FAILED" ;
+      //TODO: Refund Logic
+      await booking.save();
+      throw new ApiError(400, "SLOT_NOT_AVAILABLE");
+    }
+    booking.vehicleNumber = vehicleNumber ;
+    booking.paymentDetails.status = "SUCCESS" ;
+    booking.save() ;
+    await session.commitTransaction();
+    
+    res.status(201).json(new ApiResponse(201, { booking: booking }));
+  }catch(err){
+    
+  }
 });
 
 
-//  Get all bookings for a residence
-export const getResidenceBookingsByResidence = asyncHandler(async (req: Request, res: Response) => {
-  const { residenceId } = req.params;
 
-  if (!mongoose.Types.ObjectId.isValid(residenceId)) {
-    throw new ApiError(400, "Invalid residence ID");
+// export const createResidenceBooking = asyncHandler(async (req: Request, res: Response) => {
+//   const verifiedAuth = await verifyAuthentication(req);
+
+//   if (verifiedAuth?.userType !== "user") {
+//     throw new ApiError(403, "Only customers can book residences");
+//   }
+
+//   const {
+//     residenceId,
+//     bookingPeriod,
+//     vehicleNumber,
+//     bookedSlot,
+//     totalAmount,
+//     amountToPaid,
+//     couponCode,
+//     discount,
+//     priceRate,
+//     paymentDetails
+//   } = req.body;
+
+//   // Basic validation
+//   if (!residenceId || !bookingPeriod || !bookingPeriod.from || !bookingPeriod.to) {
+//     throw new ApiError(400, "Missing required booking fields");
+//   }
+
+//   const newBooking = await ResidenceBookingModel.create({
+//     residenceId,
+//     customerId: verifiedAuth.user._id,
+//     bookingPeriod,
+//     vehicleNumber,
+//     bookedSlot,
+//     totalAmount,
+//     amountToPaid,
+//     couponCode,
+//     discount,
+//     priceRate,
+//     paymentDetails
+//   });
+
+//   res.status(201).json(new ApiResponse(201, newBooking, "Residence booking created successfully"));
+// });
+
+
+export const residenceBookingInfo = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+    
+    // Find the booking and populate related data
+    const booking = await ResidenceBookingModel.findById(bookingId)
+      .populate<{residenceId : mongoose.MergeType<IResident,{owner : IMerchant}>}>({
+        path :'garageId',
+        populate : {
+          path : "owner" ,
+          model : Merchant,
+          select :"-password"
+        }
+      }).orFail()
+      .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id').orFail()
+      .lean();
+
+    if (!booking) {
+      throw new ApiError(404, 'BOOKING_NOT_FOUND');
+    }
+
+    // If neither the customer nor the garage owner, deny access
+    if (verifiedAuth.user._id !== booking.customerId._id && verifiedAuth.user._id !== booking.residenceId.owner._id ) {
+      throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
+    }
+
+    // Format the response
+    console.log(booking) ;
+    const response = {
+      _id: booking._id,
+      residence: {
+        _id: booking.residenceId._id,
+        name: booking.residenceId.residenceName,
+        address: booking.residenceId.address,
+        contactNumber: booking.residenceId.contactNumber,
+        ownerName : `${booking.residenceId.owner?.firstName} ${booking.residenceId.owner?.lastName}`
+      },
+      type : "R",
+      customer: {
+        _id: booking.customerId._id,
+        name: `${booking.customerId.firstName} ${booking.customerId.lastName || ''}`.trim(),
+        email: booking.customerId.email,
+        phone: booking.customerId.phoneNumber
+      },
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      priceRate : booking.priceRate ,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.method,
+        paidAt : booking.paymentDetails.paidAt,
+        platformCharge : booking.platformCharge,
+      }
+    };
+
+    res.status(200).json(new ApiResponse(200, response));
+  } catch (error) {
+    console.log(error);
+    throw error;
   }
+})
 
-  const bookings = await ResidenceBookingModel.find({ residenceId })
-    .populate("customerId", "firstName lastName email phoneNumber");
+/**
+ * @description Get a paginated list of garage bookings
+ * @route GET /api/merchants/garage/bookings
+ * @queryParam page - Page number (default: 1)
+ * @queryParam size - Number of items per page (default: 10)
+ * @queryParam garageId - Optional garage ID (for merchants to filter by garage)
+ * @access Private - Accessible by authenticated users (sees their own bookings) or merchants (sees their garage's bookings)
+ */
+const BookingQueryParams = z.object({
+  page : z.coerce.number().min(1).default(1),
+  limit : z.coerce.number().min(1).default(10),
+  residenceId : z.string().optional()
+})
+export const residenceBookingList = asyncHandler(async (req, res) => {
+  try {
+    // Parse query parameters with defaults
+    console.log("NEW Query Requested")
+    const {page , limit , residenceId} = BookingQueryParams.parse(req.query);
+    const skip = (page - 1) * limit;
 
-  res.status(200).json(new ApiResponse(200, bookings, "Bookings fetched successfully"));
+    // Verify authentication
+    const verifiedAuth = await verifyAuthentication(req);
+    if (!verifiedAuth?.user) {
+      throw new ApiError(401, 'UNAUTHORIZED');
+    }
+
+    // Build the base query
+    const query: any = {};
+    
+    if (verifiedAuth.userType === 'user') {
+      // For regular users, only show their own bookings
+      query.customerId = verifiedAuth.user._id;
+    } else if (verifiedAuth.userType === 'merchant') {
+      // For merchants, show bookings for their garages
+      if (residenceId) {
+        // Verify the garage belongs to the merchant
+        const garage = await ResidenceModel.findOne({ _id: residenceId, owner: verifiedAuth.user._id } , {}, {
+          
+        });
+        if (!garage) {
+          throw new ApiError(404, 'Residence_NOT_FOUND_OR_ACCESS_DENIED');
+        }
+        query.residenceId = residenceId;
+      } else {
+        // If no garageId provided, get all garages owned by the merchant
+        const merchantGarages = await ResidenceModel.find({ owner: verifiedAuth.user._id }, '_id');
+        const garageIds = merchantGarages.map(g => g._id);
+        if (garageIds.length === 0) {
+          // No garages found for this merchant
+          res.status(200).json(new ApiResponse(200, {
+            bookings: [],
+            pagination: {
+              total: 0,
+              page,
+              size: limit
+            }
+          }));
+          return ;
+        }
+        query.garageId = { $in: garageIds };
+      }
+    } else {
+      throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
+    }
+    query["paymentDetails.status"] = {$ne : "PENDING"};
+    console.log("query at garage: ", query);
+    // Get paginated bookings with related data
+    const bookings = await ResidenceBookingModel.find(query)
+      .populate<{residenceId : mongoose.MergeType<IResident,{owner : IMerchant}>}>({
+        path :'garageId',
+        populate : {
+          path : "owner" ,
+          model : Merchant,
+          select :"-password"
+        }
+      })
+      .populate<{customerId : IUser}>('customerId', 'firstName lastName email phoneNumber _id')
+      .sort({ createdAt: -1 }) // Most recent first
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Format the response
+    console.log(bookings) ;
+    const formattedBookings = bookings.map(booking => ({
+      _id: booking._id,
+      residence: {
+        _id: booking.residenceId?._id,
+        name: booking.residenceId?.residenceName,
+        address: booking.residenceId?.address,
+        contactNumber: booking.residenceId?.contactNumber
+      },
+      customer: {
+        _id: booking.customerId?._id,
+        name: `${booking.customerId?.firstName} ${booking.customerId?.lastName || ''}`.trim(),
+        email: booking.customerId?.email,
+        phone: booking.customerId?.phoneNumber
+      },
+      bookingPeriod: booking.bookingPeriod,
+      vehicleNumber: booking.vehicleNumber,
+      priceRate : booking.priceRate ,
+      paymentDetails: {
+        totalAmount: booking.totalAmount,
+        amountPaid: booking.amountToPaid,
+        discount: booking.discount,
+        status: booking.paymentDetails.status,
+        method: booking.paymentDetails.method ,
+        paidAt : booking.paymentDetails.paidAt ,
+        platformCharge : booking.platformCharge,
+      },
+      status: booking.paymentDetails.status,
+      type : "R" ,
+    }));
+
+    res.status(200).json(new ApiResponse(200, {
+      bookings: formattedBookings,
+      pagination: {
+        page,
+        size: limit
+      }
+    }));
+
+  } catch (error) {
+    console.error('Error in bookingList:', error);
+    throw error;
+  }
 });
-
-
-//  Get a single booking by ID
-export const getResidenceBookingById = asyncHandler(async (req: Request, res: Response) => {
-  const { bookingId } = req.params;
-
-  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
-    throw new ApiError(400, "Invalid booking ID");
-  }
-
-  const booking = await ResidenceBookingModel.findById(bookingId)
-    .populate("customerId", "firstName lastName email phoneNumber");
-
-  if (!booking) {
-    throw new ApiError(404, "Booking not found");
-  }
-
-  res.status(200).json(new ApiResponse(200, booking, "Booking fetched successfully"));
-});
-
 
 //  Cancel/Delete a booking
 export const deleteResidenceBooking = asyncHandler(async (req: Request, res: Response) => {

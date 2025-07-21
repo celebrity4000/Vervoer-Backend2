@@ -7,7 +7,7 @@ import { imageUpload } from "../middleware/upload.middleware.js";
 import { bookGarageSlot, checkoutGarageSlot, deleteGarage, 
     editGarage, garageBookingInfo, garageBookingList, getAvailableGarageSlots, getGarageDetails, 
     getListOfGarage, registerGarage ,scanBookingQRCode} from "../controllers/merchant.garage.controller.js";
-import { addResidence, deleteResidence, getListOfResidence, getResidenceById, updateResidence ,createResidenceBooking,getResidenceBookingsByResidence,getResidenceBookingById,deleteResidenceBooking} from "../controllers/merchant.residence.controller.js";
+import { addResidence, deleteResidence, getListOfResidence, getResidenceById, updateResidence ,deleteResidenceBooking, verifyResidenceBooking, checkoutResidence, residenceBookingInfo, residenceBookingList} from "../controllers/merchant.residence.controller.js";
 import {imageUploadFields} from "../middleware/upload.middleware.js";
 
 const merchantRouter = Router() ;
@@ -41,9 +41,10 @@ merchantRouter.put("/residence/update/:residenceId",imageUpload.array("images",1
 merchantRouter.delete("/residence/delete/:residenceId",deleteResidence) ;
 merchantRouter.get("/residence/search",getListOfResidence) ;
 merchantRouter.get("/residence/:residenceId",getResidenceById) ;
-merchantRouter.post("/residence/book", imageUploadFields, createResidenceBooking) ;
-merchantRouter.get("/residence/bookings/:residenceId", getResidenceBookingsByResidence);
-merchantRouter.get("/residence/booking/:bookingId", getResidenceBookingById);
+merchantRouter.post("/residence/book", verifyResidenceBooking) ;
+merchantRouter.post("/residence/checkout", checkoutResidence) ;
+merchantRouter.get("/residence/booking", residenceBookingList);
+merchantRouter.get("/residence/booking/:id",residenceBookingInfo);
 merchantRouter.delete("/residence/booking/:bookingId", deleteResidenceBooking);
 
 export default merchantRouter ;
