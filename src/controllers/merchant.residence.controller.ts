@@ -184,30 +184,20 @@ export const getMerchantResidences = asyncHandler(async (req: Request, res: Resp
   const residences = await ResidenceModel.find({ owner });
   res.status(200).json(new ApiResponse(200, residences, "Residences retrieved successfully"));
 });
+async function findBookedResidenceIn(startDate: Date, endDate: Date, id?: string) {
+  if (startDate >= endDate) return [];
 
-async function findBookedResidenceIn(startDate : Date , endDate: Date , id? : string ){
-  let q: mongoose.FilterQuery<IResidenceBooking> = {};
-  if(id) q._id = id ;
-  if(startDate < endDate){
-    return await ResidenceBookingModel.find({
-      ...q,
-      "paymentDetails.status" : "SUCCESS" ,
-      $or : [{
-      "bookingPeriod.from" : {
-        $gte : startDate , $lt : endDate ,
-      }},
-      {
-        "bookingPeriod.to" : {
-          $lt : endDate , $gte : startDate
-        }
-      },{
-        "bookingPeriod.from" : {$lte : startDate},
-        "bookingPeriod.to" : {$gte : endDate} ,
-    }]
-    })
-  }
-  return [] ;
+  const q: mongoose.FilterQuery<IResidenceBooking> = {
+    "paymentDetails.status": "SUCCESS",
+    "bookingPeriod.from": { $lt: endDate },
+    "bookingPeriod.to": { $gt: startDate }
+  };
+
+  if (id) q._id = id;
+
+  return await ResidenceBookingModel.find(q);
 }
+
 const ResidenceQuery = z.object({
   longitude : z.coerce.number() ,
   latitude : z.coerce.number(),

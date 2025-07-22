@@ -152,8 +152,8 @@ export const editParkingLot = asyncHandler(async (req: Request, res: Response) =
 
 export const getAvailableSpace = asyncHandler(async (req, res) => {
   try {
-    const startDate = z.iso.datetime().parse(req.query.startDate);
-    const lastDate = z.iso.datetime().parse(req.query.lastDate);
+    const startDate = z.iso.date().parse(req.query.startDate);
+    const lastDate = z.iso.date().parse(req.query.lastDate);
     const lotID = z.string().parse(req.query.lotId);
     const lotData = await ParkingLotModel.findById(lotID);
     let totalSpace = 0 ;
@@ -512,7 +512,7 @@ export const bookASlot = asyncHandler(async (req, res) => {
 
 export const getParkingLotbyId = asyncHandler(async (req,res)=>{
   const lotId = req.params.id ;
-  const lotdetalis = await ParkingLotModel.findById(lotId).populate<{owner:IMerchant}>("owner", "-password -otp -otpVerified");
+  const lotdetalis = await ParkingLotModel.findById(lotId);
   if(lotdetalis){
     res.status(200).json(new ApiResponse(200,lotdetalis));
   }
@@ -681,7 +681,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         .lean(),
       LotRentRecordModel.countDocuments(filter)
     ]);
-    console.log("Bookings", bookings.length) ;
+    console.log("Bookings", bookings) ;
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
       parking: {
