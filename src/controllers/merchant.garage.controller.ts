@@ -342,29 +342,31 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
  */
 export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Response) => {
   try {
-    console.log("New checkout request\nValidating Auth");
+    console.log("new checkout request\nValidating Auth")
     const verifiedAuth = await verifyAuthentication(req);
     
     if (verifiedAuth?.userType !== "user" || !verifiedAuth?.user) {
       throw new ApiError(401, 'UNAUTHORIZED');
     }
 
-    console.log("Validation Successful. Request user is", verifiedAuth.user._id);
-    console.log("Validating req data");
-    const rData = CheckoutData.parse(req.body);
-    console.log("Validation Successful. Req data is", rData);
-    console.log("Verifying garage");
+    console.log("Validation Successful request user is", verifiedAuth.user._id)
+    console.log("Validating req data")
     
-    const garage = await Garage.findById(rData.garageId).populate<{owner: IMerchant}>("owner", "-password");
+    // Parse and validate request data
+    const rData = CheckoutData.parse(req.body);
+    console.log("Validation Successful req data is", rData)
+    
+    console.log("Verifying garage")
+    const garage = await Garage.findById(rData.garageId).populate<{owner : IMerchant }>("owner", "-password");
     if (!garage) {
       throw new ApiError(404, "GARAGE_NOT_FOUND");
     }
+    console.log("Verified garage is", garage)
     
-    console.log("Verifying garage is", garage);
     // Check if the slot exists in availableSlots
     const selectedZone = garage?.spacesList?.get(rData.bookedSlot.zone);
-    console.log("Verifying slot id", rData.bookedSlot.slot);
-    console.log("Maximum Slot:", selectedZone);
+    console.log("Verifying slot id", rData.bookedSlot.slot)
+    console.log("Maximum Slot: ", selectedZone)
     
     if (!selectedZone || rData.bookedSlot.slot > selectedZone.count) {
       throw new ApiError(400, "INVALID_SLOT");
@@ -372,7 +374,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     
     // Check availability
     const bookedSlotId = generateParkingSpaceID(rData.bookedSlot.zone, rData.bookedSlot.slot.toString());
-    console.log("Checking availability of slot");
+    console.log("checking availability of slot")
     
     const isNotAvailableSlot = await GarageBooking.findOne({
       garageId: rData.garageId,
@@ -392,12 +394,12 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       ]
     }); 
     
-    if (isNotAvailableSlot) {
-      console.log("Slot is not available. Found a booking", isNotAvailableSlot._id);
+    if(isNotAvailableSlot){
+      console.log("slot is not available found a booking ", isNotAvailableSlot._id)
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     } 
     
-    // Apply coupon if provided
+    // Calculate pricing
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate = new Date(rData.bookingPeriod.to);
     const totalHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
@@ -408,6 +410,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
 
     const platformCharge = totalAmount * 0.1;
     
+    // Apply coupon if provided
     if (rData.couponCode) {
       const isValidCoupon = await validateCoupon(rData.couponCode, verifiedAuth?.user);
       
@@ -422,24 +425,22 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       }
     }
     
+    // Handle Stripe customer
     let stripeCustomerId = verifiedAuth.user.stripeCustomerId;
-    if (!stripeCustomerId) {
-      stripeCustomerId = await createStripeCustomer(
-        verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName,
-        verifiedAuth.user.email
-      );
-      User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId });
+    if(!stripeCustomerId){
+      stripeCustomerId = await createStripeCustomer(verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName, verifiedAuth.user.email);
+      await User.findByIdAndUpdate(verifiedAuth.user._id, {stripeCustomerId});
     }
 
     const stripeDetails = await initPayment(totalAmount + platformCharge - discount, stripeCustomerId);
     
-    // Create booking with payment and checkout details
+    // Create booking with vehicle number
     const booking = await GarageBooking.create({
       garageId: rData.garageId,
       bookedSlot: bookedSlotId,
       customerId: verifiedAuth.user._id,
       bookingPeriod: rData.bookingPeriod,
-      vehicleNumber: rData.vehicleNumber,
+      vehicleNumber: rData.vehicleNumber, // This should now be properly included
       totalAmount: totalAmount + discount,
       discount: discount,
       amountToPaid: totalAmount + platformCharge - discount,
@@ -451,12 +452,12 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         status: 'PENDING',
         transactionId: null,
         paidAt: null,
-        StripePaymentDetails: { ...stripeDetails, customerId: stripeCustomerId }
+        StripePaymentDetails: {...stripeDetails, customerId: stripeCustomerId}
       },
       coupon: couponApplied ? rData.couponCode : undefined,
     });
 
-    console.log("Booking created:", booking);
+    console.log("Created booking:", booking);
     
     const response = {
       bookingId: booking._id,
@@ -486,14 +487,14 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
 
     res.status(200).json(new ApiResponse(200, response));
   } catch (err) {
-    console.log(err);
+    console.log("Checkout error:", err);
     if (err instanceof z.ZodError) {
+      console.log("Validation errors:", err.issues);
       throw new ApiError(400, 'VALIDATION_ERROR', err.issues);
     }
     throw err;
   }
 });
-
 // Helper function to validate coupon
 async function validateCoupon(code: string, user: mongoose.Document<any, any, IUser>): Promise<boolean> {
   return code.startsWith('DISC');
