@@ -664,4 +664,36 @@ export const deleteAccount = asyncHandler(
 );
 
 
+// bank details retrieval
+export const getBankDetails = asyncHandler(async (req: Request, res: Response) => {
+  const userInfo = await verifyAuthentication(req);
 
+  let bankDetails;
+
+  if (userInfo.userType === "driver") {
+    const driver = await Driver.findById(userInfo.user._id).select("bankDetails");
+    if (!driver || !driver.bankDetails) {
+      res.status(404).json(new ApiResponse(404, null, "Bank details not found for driver"));
+      return;
+    }
+    bankDetails = driver.bankDetails;
+
+  } else if (userInfo.userType === "merchant") {
+    const merchant = await Merchant.findById(userInfo.user._id).select("bankDetails");
+    if (!merchant || !merchant.bankDetails) {
+      res.status(404).json(new ApiResponse(404, null, "Bank details not found for merchant"));
+      return;
+    }
+    bankDetails = merchant.bankDetails;
+
+  } else {
+    const user = await User.findById(userInfo.user._id).select("bankDetails");
+    if (!user || !user.bankDetails) {
+      res.status(404).json(new ApiResponse(404, null, "Bank details not found for user"));
+      return;
+    }
+    bankDetails = user.bankDetails;
+  }
+
+  res.status(200).json(new ApiResponse(200, bankDetails, "Bank details retrieved successfully"));
+});

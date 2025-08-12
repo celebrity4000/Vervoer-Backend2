@@ -8,6 +8,7 @@ import uploadToCloudinary from "../utils/cloudinary.js";
 import { jwtEncode } from "../utils/jwt.js";
 import { IMerchant } from "../models/merchant.model.js";
 import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
+import mongoose from "mongoose";
 
 const addressSchema = z.object({
   street: z.string(),
@@ -401,24 +402,48 @@ export const deleteDryCleanerShopImage = asyncHandler(
 // get all dry cleaner
 export const getAllDryCleaners = asyncHandler(
   async (req: Request, res: Response) => {
-    const { authUser } = req as any;
-
-    if (authUser.userType !== "merchant") {
-      throw new ApiError(403, "Unauthorized access");
-    }
-
     const dryCleaners = await DryCleaner.find().select("-orders");
-
+    
     if (!dryCleaners || dryCleaners.length === 0) {
       throw new ApiError(404, "No dry cleaners found");
     }
-
+    
     res.status(200).json(
       new ApiResponse(200, { dryCleaners }, "All dry cleaners fetched successfully.")
     );
   }
 );
 
+// merchant get it's own dry cleaner
+export const getownDrycleaner = asyncHandler(async (req: Request, res: Response) => {
+  const { authUser } = req as any;
+
+  console.log('Authenticated User:', authUser);
+
+  if (!authUser || authUser.userType !== "merchant") {
+    throw new ApiError(403, "Unauthorized access");
+  }
+
+  try {
+    // FIX HERE -> authUser.user._id
+    const dryCleaners = await DryCleaner.find({ owner: authUser.user._id }).select("-orders");
+
+    console.log('Found Dry Cleaners:', dryCleaners.length);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { dryCleaners: dryCleaners || [] },
+        dryCleaners && dryCleaners.length > 0
+          ? "Your dry cleaners fetched successfully."
+          : "No dry cleaners found for this merchant"
+      )
+    );
+  } catch (error) {
+    console.error('Error fetching dry cleaners:', error);
+    throw new ApiError(500, "Failed to fetch dry cleaners");
+  }
+});
 
 // order by the user
 const orderSchema = z.object({
@@ -460,6 +485,36 @@ export const placeOrderToDryCleaner = asyncHandler(
     );
   }
 );
+
+// delete own dry cleaner
+export const deleteOwnDryCleaner = asyncHandler(async (req: Request, res: Response) => {
+  const { authUser } = req as any;
+  const dryCleanerId = req.params.id;
+
+  if (!mongoose.Types.ObjectId.isValid(dryCleanerId)) {
+    throw new ApiError(400, "Invalid Dry Cleaner ID");
+  }
+
+  // Ensure user is authenticated and is a merchant
+  if (!authUser || authUser.userType !== "merchant") {
+    throw new ApiError(403, "Unauthorized access");
+  }
+
+  // Find the Dry Cleaner with the given ID and owned by this merchant
+  const dryCleaner = await DryCleaner.findOne({
+    _id: dryCleanerId,
+    owner: authUser.user._id  // Ensure ownership
+  });
+
+  if (!dryCleaner) {
+    throw new ApiError(404, "Dry Cleaner not found or you don't have permission to delete it");
+  }
+
+  // Delete the Dry Cleaner
+  await dryCleaner.deleteOne();
+
+  res.status(200).json(new ApiResponse(200, null, "Dry Cleaner deleted successfully"));
+});
 
 
 

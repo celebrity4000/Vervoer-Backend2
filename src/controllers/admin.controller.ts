@@ -14,7 +14,7 @@ import { ParkingLotModel } from "../models/merchant.model.js";
 import mongoose from "mongoose";
 import { LotRentRecordModel } from "../models/merchant.model.js";
 import { ResidenceModel } from "../models/merchant.residence.model.js";
-
+import { Driver } from "../models/driver.model.js";
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
 let adminOtpExpiry: Date | null = null;
@@ -381,3 +381,41 @@ export const adminDeleteResidence = asyncHandler(async (req: Request, res: Respo
   res.status(200).json(new ApiResponse(200, null, "Residence deleted successfully"));
 });
 
+
+// get banlk details
+export const getBankDetailsByAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const userType = req.query.userType;
+
+  if (!["user", "merchant", "driver"].includes(userType as string)) {
+    throw new ApiError(400, "Invalid userType. Must be user, merchant or driver");
+  }
+
+  let bankDetails;
+
+  if (userType === "driver") {
+    const driver = await Driver.findById(id).select("bankDetails");
+    if (!driver || !driver.bankDetails) {
+      throw new ApiError(404, "Bank details not found for driver");
+    }
+    bankDetails = driver.bankDetails;
+
+  } else if (userType === "merchant") {
+    const merchant = await Merchant.findById(id).select("bankDetails");
+    if (!merchant || !merchant.bankDetails) {
+      throw new ApiError(404, "Bank details not found for merchant");
+    }
+    bankDetails = merchant.bankDetails;
+
+  } else {
+    const user = await User.findById(id).select("bankDetails");
+    if (!user || !user.bankDetails) {
+      throw new ApiError(404, "Bank details not found for user");
+    }
+    bankDetails = user.bankDetails;
+  }
+
+  res.status(200).json(
+    new ApiResponse(200, bankDetails, "Bank details fetched successfully")
+  );
+});

@@ -1,12 +1,12 @@
 import { Router } from "express";
-import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails,resetUserPassword, uploadProfileImage, editUserProfile, getUserProfile, deleteAccount} from "../controllers/User.js";  
+import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails,resetUserPassword, uploadProfileImage, editUserProfile, getUserProfile, deleteAccount,getBankDetails} from "../controllers/User.js";  
 import { asyncHandler } from "../utils/asynchandler.js";
-import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
+import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner,getownDrycleaner ,deleteOwnDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
 import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../controllers/driverBooking.controller.js";
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
-import {registerDriver,} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence} from "../controllers/admin.controller.js";
+import {completeDriverProfile, getDriverProfile, loginDriver, registerDriverBasic,} from "../controllers/driver.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin} from "../controllers/admin.controller.js";
 import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.parkinglot.controller.js";
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
@@ -23,6 +23,7 @@ router.post("/forgot-password", sendForgotPasswordOtp);
 router.post("/verify-forgot-otp", verifyForgotPasswordOtpHandler);
 router.post("/reset-password", resetForgottenPassword);
 router.put("/reset-user-password", authenticate, resetUserPassword);
+router.get("/get-bank-details",authenticate, getBankDetails);
 
 router.delete("/delete-account", authenticate, deleteAccount);
 router.put(
@@ -60,6 +61,9 @@ router.put(
 router.put("/edit-address-drycleaner/:id", authenticate, editDryCleanerAddress);
 router.put("/edit-service-drycleaner/:dryCleanerId", authenticate, editDryCleanerService);
 router.put("/edit-hours-drycleaner/:dryCleanerId", authenticate, editDryCleanerHours);
+router.get("/get-own-drycleaner", authenticate, getownDrycleaner);
+router.delete("/delete-own-drycleaner/:id", authenticate, deleteOwnDryCleaner);
+
 router.put(
   "/update-drycleaner-shop-images/:id",
   authenticate,
@@ -71,11 +75,20 @@ router.delete(
   authenticate,
   deleteDryCleanerShopImage
 );
-router.get("/dry-cleaner", authenticate, getAllDryCleaners);
-router.post("/place-order/:dryCleanerId", authenticate, placeOrderToDryCleaner);
+router.get("/dry-cleaner", getAllDryCleaners);
+router.post("/place-order/:dryCleanerId",authenticate, placeOrderToDryCleaner);
 
 // Driver registration route
-router.post("/register-driver", imageUploadFields, registerDriver);
+router.post("/register-driver", registerDriverBasic);
+
+// STEP 2: Complete driver profile (with all required images)
+router.post("/complete-profile", authenticate, imageUploadFields, completeDriverProfile);
+
+// Get driver profile (to check completion status)
+router.get("/profile", authenticate, getDriverProfile);
+
+// Driver login
+router.post("/login", authenticate, loginDriver);
 // user booking route
 router.post("/create-booking", authenticate, createBooking);
 router.post("/book-driver-for-delivery", authenticate, bookDriverForDelivery);
@@ -102,7 +115,7 @@ router.get("/admin/get-list-of-parking-lots", isAdmin, getListOfParkingLot);
 router.delete("/admin/delete-parking-lot/:id", isAdmin, adminDeleteParking);
 router.get("/admin/get-bookings-by-parking-lot/:id", isAdmin, adminGetBookingsByParkingLot);
 router.delete("/admin/delete-residence/:id", isAdmin, adminDeleteResidence);
-
+router.get("/admin/get-bank-details/:id", isAdmin, getBankDetailsByAdmin);
 
 // Payment gateway route
 router.post("/create-payment", authenticate, createPayment);
