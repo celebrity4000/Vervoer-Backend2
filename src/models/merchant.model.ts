@@ -312,14 +312,7 @@ const dryCleanerSchema = new mongoose.Schema({
       price: { type: Number },
     },
   ],
-  orders: [
-    {
-      serviceName: String,
-      quantity: Number,
-      price: Number,
-      status: { type: String, enum: ["active", "completed"], default: "active" },
-    },
-  ],
+  
 }, {
   timestamps: true,
   toJSON: { virtuals: true },

@@ -1,17 +1,20 @@
 import { Router } from "express";
 import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails,resetUserPassword, uploadProfileImage, editUserProfile, getUserProfile, deleteAccount,getBankDetails} from "../controllers/User.js";  
 import { asyncHandler } from "../utils/asynchandler.js";
-import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners , placeOrderToDryCleaner,getownDrycleaner ,deleteOwnDryCleaner} from "../controllers/merchant.drycleaner.controller.js";
-import { createBooking ,bookDriverForDelivery,cancelDriverBooking} from "../controllers/driverBooking.controller.js";
+import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners ,getownDrycleaner ,deleteOwnDryCleaner, getDryCleanerServices} from "../controllers/merchant.drycleaner.controller.js";
+
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
-import {completeDriverProfile, getDriverProfile, loginDriver, registerDriverBasic,} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin} from "../controllers/admin.controller.js";
+import {completeDriverProfile, getDriverProfile, registerDriverBasic,updateDriverPersonalInfo,updateVehicleInfo, createDriverBankDetails, getDriverAttestationStatus, submitDriverAttestation, uploadDriverProfilePhoto} from "../controllers/driver.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin, setGlobalPricing,getGlobalPricing} from "../controllers/admin.controller.js";
 import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.parkinglot.controller.js";
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 import { getCurrentSession } from "../controllers/merchant.controller.js";
+import {PlaceDryCleanerOrder} from "../controllers/DryCleanerBooking.controller.js";
+import {  cancelBookingRequest, completeTrip, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getUserBookingRequests, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip } from "../controllers/driverBooking.controller.js";
+
 const router = Router();
 
 // User routes
@@ -63,6 +66,8 @@ router.put("/edit-service-drycleaner/:dryCleanerId", authenticate, editDryCleane
 router.put("/edit-hours-drycleaner/:dryCleanerId", authenticate, editDryCleanerHours);
 router.get("/get-own-drycleaner", authenticate, getownDrycleaner);
 router.delete("/delete-own-drycleaner/:id", authenticate, deleteOwnDryCleaner);
+router.get("/dry-cleaners/:dryCleanerId/services", getDryCleanerServices);
+router.post("/place-drycleaner-order", authenticate, PlaceDryCleanerOrder);
 
 router.put(
   "/update-drycleaner-shop-images/:id",
@@ -76,23 +81,65 @@ router.delete(
   deleteDryCleanerShopImage
 );
 router.get("/dry-cleaner", getAllDryCleaners);
-router.post("/place-order/:dryCleanerId",authenticate, placeOrderToDryCleaner);
 
 // Driver registration route
 router.post("/register-driver", registerDriverBasic);
 
-// STEP 2: Complete driver profile (with all required images)
+router.post('/update-vehicle', authenticate, imageUploadFields, updateVehicleInfo);
+
+router.post('/update-personal-info', authenticate, imageUploadFields, updateDriverPersonalInfo);
+router.post('/bank-details', authenticate, imageUploadFields, createDriverBankDetails);
+router.get('/attestation/status',authenticate, getDriverAttestationStatus);
+router.post('/attestation/submit',authenticate, imageUploadFields, submitDriverAttestation);
+router.post('/upload-profile-photo',authenticate, imageUploadFields, uploadDriverProfilePhoto);
+
+//  Complete driver profile (with all required images)
 router.post("/complete-profile", authenticate, imageUploadFields, completeDriverProfile);
 
 // Get driver profile (to check completion status)
-router.get("/profile", authenticate, getDriverProfile);
+router.get("/driver/profile", authenticate, getDriverProfile);
 
 // Driver login
-router.post("/login", authenticate, loginDriver);
-// user booking route
-router.post("/create-booking", authenticate, createBooking);
-router.post("/book-driver-for-delivery", authenticate, bookDriverForDelivery);
-router.delete("/cancel-driver-booking/:id", authenticate, cancelDriverBooking);
+// router.post("/login", authenticate, loginDriver);
+
+// Create a scheduled booking request
+router.post("/scheduled-request", createScheduledBookingRequest);
+
+// Get available drivers for a specific date/time
+router.get("/available-drivers", getAvailableDriversForScheduling);
+
+// Get user's booking requests (with filters)
+router.get("/user/requests", getUserBookingRequests);
+
+// Cancel a booking request
+router.patch("/user/cancel/:id", cancelBookingRequest);
+
+// ===== DRIVER ROUTES =====
+
+// Get driver's booking requests (pending and all)
+router.get("/driver/requests", getDriverBookingRequests);
+
+// Respond to a booking request (accept/reject)
+router.patch("/driver/respond", respondToBookingRequest);
+
+// Get driver's scheduled bookings (today/upcoming)
+router.get("/driver/scheduled", getDriverScheduledBookings);
+
+// Start a scheduled trip
+router.patch("/driver/start-trip/:id", startScheduledTrip);
+
+// Complete a trip
+router.patch("/driver/complete-trip/:id", completeTrip);
+
+// Get current active booking
+router.get("/driver/active", getActiveBooking);
+
+// Set driver availability status
+router.patch("/driver/availability", setAvailabilityStatus);
+
+// Get driver's booking history
+router.get("/driver/history", getDriverBookingHistory);
+
 
 
 // Admin routes
@@ -116,7 +163,8 @@ router.delete("/admin/delete-parking-lot/:id", isAdmin, adminDeleteParking);
 router.get("/admin/get-bookings-by-parking-lot/:id", isAdmin, adminGetBookingsByParkingLot);
 router.delete("/admin/delete-residence/:id", isAdmin, adminDeleteResidence);
 router.get("/admin/get-bank-details/:id", isAdmin, getBankDetailsByAdmin);
-
+router.post("/admin/get-current-price-per-km", isAdmin, setGlobalPricing);
+router.get("/admin/get-global-pricing", getGlobalPricing);
 // Payment gateway route
 router.post("/create-payment", authenticate, createPayment);
 

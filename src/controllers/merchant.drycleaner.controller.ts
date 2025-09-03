@@ -452,39 +452,42 @@ const orderSchema = z.object({
   price: z.number().min(0),
 });
 
-export const placeOrderToDryCleaner = asyncHandler(
-  async (req: Request, res: Response) => {
-    const { authUser } = req as any;
+// export const placeOrderToDryCleaner = asyncHandler(
+//   async (req: Request, res: Response) => {
+//     const { authUser } = req as any;
 
-    if (authUser.userType !== "user") {
-      throw new ApiError(403, "Only users can place orders.");
-    }
+//     if (authUser.userType !== "user") {
+//       throw new ApiError(403, "Only users can place orders.");
+//     }
 
-    const dryCleanerId = req.params.dryCleanerId;
+//     const dryCleanerId = req.params.dryCleanerId;
 
-    // Validate request body
-    const rData = orderSchema.parse(req.body);
+//     // Validate request body
+//     const rData = orderSchema.parse(req.body);
 
-    const dryCleaner = await DryCleaner.findById(dryCleanerId);
-    if (!dryCleaner) {
-      throw new ApiError(404, "Dry cleaner not found");
-    }
+//     const dryCleaner = await DryCleaner.findById(dryCleanerId);
+//     if (!dryCleaner) {
+//       throw new ApiError(404, "Dry cleaner not found");
+//     }
 
-    const newOrder = {
-      serviceName: rData.serviceName,
-      quantity: rData.quantity,
-      price: rData.price,
-      status: "active",
-    };
+//     const newOrder = {
+//       serviceName: rData.serviceName,
+//       quantity: rData.quantity,
+//       price: rData.price,
+//       status: "active",
+//     };
 
-    dryCleaner.orders.push(newOrder);
-    await dryCleaner.save();
+//     dryCleaner.orders.push(newOrder);
+//     await dryCleaner.save();
 
-    res.status(201).json(
-      new ApiResponse(201, { dryCleaner }, "Order placed successfully.")
-    );
-  }
-);
+//     res.status(201).json(
+//       new ApiResponse(201, { dryCleaner }, "Order placed successfully.")
+//     );
+//   }
+// );
+
+
+
 
 // delete own dry cleaner
 export const deleteOwnDryCleaner = asyncHandler(async (req: Request, res: Response) => {
@@ -515,6 +518,29 @@ export const deleteOwnDryCleaner = asyncHandler(async (req: Request, res: Respon
 
   res.status(200).json(new ApiResponse(200, null, "Dry Cleaner deleted successfully"));
 });
+
+
+// service dry cleaner
+export const getDryCleanerServices = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { dryCleanerId } = req.params;
+
+    // Find dry cleaner by ID
+    const dryCleaner = await DryCleaner.findById(dryCleanerId).select("services");
+
+    if (!dryCleaner) {
+      throw new ApiError(404, "Dry cleaner not found");
+    }
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        dryCleaner.services,
+        "Dry cleaner services fetched successfully"
+      )
+    );
+  }
+);
 
 
 

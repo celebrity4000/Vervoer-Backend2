@@ -44,7 +44,7 @@ export const UserBaseSchemaFields = {
 
 // Driver Interface
 export interface IDriver extends Document {
-  // Base user fields
+  
   phoneNumber: string;
   password: string;
   firstName: string;
@@ -78,7 +78,7 @@ export interface IDriver extends Document {
   kidsFriendly?: boolean;
   carSeatsAvailable?: boolean;
   driveProfileImage?: string;
-  profileCompleted?: boolean; // New field to track completion status
+  profileCompleted?: boolean; 
   
   backgroudCheck?: {
     checker: boolean;

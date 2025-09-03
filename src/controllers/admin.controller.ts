@@ -15,9 +15,33 @@ import mongoose from "mongoose";
 import { LotRentRecordModel } from "../models/merchant.model.js";
 import { ResidenceModel } from "../models/merchant.residence.model.js";
 import { Driver } from "../models/driver.model.js";
+
 // In-memory temporary store for OTP and expiry
 let adminOtp: string | null = null;
 let adminOtpExpiry: Date | null = null;
+
+// Authentication verification helper function
+const verifyAuthentication = async (req: Request) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+
+  const token = authHeader.split(" ")[1];
+  const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+
+  if (!decoded || decoded.role !== "admin") {
+    throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+  }
+
+  // Return admin user info - you might need to adjust this based on your actual admin model
+  const admin = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
+  
+  return {
+    user: admin || { _id: "admin", email: process.env.ADMIN_EMAIL },
+    userType: "admin"
+  };
+};
 
 // send OTP to admin email
 export const sendAdminOtp = async (req: Request, res: Response) => {
@@ -382,7 +406,7 @@ export const adminDeleteResidence = asyncHandler(async (req: Request, res: Respo
 });
 
 
-// get banlk details
+// get bank details
 export const getBankDetailsByAdmin = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   const userType = req.query.userType;
@@ -418,4 +442,193 @@ export const getBankDetailsByAdmin = asyncHandler(async (req: Request, res: Resp
   res.status(200).json(
     new ApiResponse(200, bankDetails, "Bank details fetched successfully")
   );
+});
+
+
+
+// Global pricing model/schema - create this as a new model
+const GlobalPricingSchema = new mongoose.Schema({
+  pricePerKm: {
+    type: Number,
+    required: true,
+    min: [1, "Price per km must be at least ₹1"],
+    max: [1000, "Price per km cannot exceed ₹1000"]
+  },
+  effectiveFrom: {
+    type: Date,
+    required: true,
+    default: Date.now
+  },
+  setBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Admin", // Reference to admin who set the price
+    required: true
+  },
+  reason: {
+    type: String,
+    default: "Global pricing update"
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  }
+}, { 
+  timestamps: true 
+});
+
+// Ensure only one active pricing at a time
+GlobalPricingSchema.index({ isActive: 1 });
+
+export const GlobalPricing = mongoose.model("GlobalPricing", GlobalPricingSchema);
+
+// Validation schema
+const setPricingSchema = z.object({
+  pricePerKm: z.number().positive("Price per km must be positive").max(1000, "Price per km cannot exceed ₹1000"),
+  effectiveFrom: z.string().optional().refine((date) => {
+    if (!date) return true;
+    const parsedDate = new Date(date);
+    return parsedDate >= new Date();
+  }, "Effective date must be in the future or today"),
+  reason: z.string().optional()
+});
+
+// Set global pricing for all drivers
+export const setGlobalPricing = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    console.log("=== SET GLOBAL PRICING DEBUG ===");
+    console.log("Request body:", req.body);
+    console.log("================================");
+
+    const authResult = await verifyAuthentication(req);
+    
+    // Check if user is admin
+    if (authResult.userType !== "admin") {
+      throw new ApiError(403, "Only administrators can set global pricing");
+    }
+
+    const validatedData = setPricingSchema.parse(req.body);
+    const effectiveDate = validatedData.effectiveFrom ? new Date(validatedData.effectiveFrom) : new Date();
+
+    const session = await mongoose.startSession();
+    let newPricing: any = null; 
+
+    try {
+      await session.withTransaction(async () => {
+        // Deactivate all existing pricing
+        await GlobalPricing.updateMany(
+          { isActive: true },
+          { 
+            $set: { 
+              isActive: false,
+              deactivatedAt: new Date(),
+              deactivatedBy: String(authResult.user._id)
+            }
+          },
+          { session }
+        );
+
+        // Create new global pricing
+        const pricingArray = await GlobalPricing.create([{
+          pricePerKm: validatedData.pricePerKm,
+          effectiveFrom: effectiveDate,
+          setBy: String(authResult.user._id),
+          reason: validatedData.reason || "Global pricing update",
+          isActive: true
+        }], { session });
+
+        newPricing = pricingArray[0]; // Get the first (and only) element
+      });
+
+      await session.commitTransaction();
+
+      // TypeScript now knows newPricing is not null here because the transaction succeeded
+      if (!newPricing) {
+        throw new ApiError(500, "Failed to create pricing record");
+      }
+
+      console.log(`Global pricing set to ₹${validatedData.pricePerKm}/km`);
+
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          { 
+            pricing: newPricing,
+            appliesTo: "All drivers",
+            effectiveFrom: effectiveDate
+          },
+          `Global pricing set to ₹${validatedData.pricePerKm}/km for all drivers`
+        )
+      );
+
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+
+  } catch (error: unknown) {
+    console.error("=== SET GLOBAL PRICING ERROR ===");
+    console.error("Error:", error);
+    console.error("===============================");
+    
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, `Validation failed: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
+    }
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Failed to set global pricing: ${errorMessage}`);
+  }
+});
+
+export const getCurrentPricePerKm = async (): Promise<number> => {
+  try {
+    const currentPricing = await GlobalPricing.findOne({ isActive: true });
+    return currentPricing?.pricePerKm || 10; 
+  } catch (error) {
+    console.error("Error getting current price per km:", error);
+    return 10; 
+  }
+};
+
+export const getGlobalPricing = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    // Find latest active global pricing
+    const activePricing = await GlobalPricing.findOne({ isActive: true })
+      .sort({ effectiveFrom: -1 }) // In case multiple, pick the latest
+      .lean();
+
+    if (!activePricing) {
+      throw new ApiError(404, "No active global pricing found");
+    }
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          pricePerKm: activePricing.pricePerKm,
+          effectiveFrom: activePricing.effectiveFrom,
+          setBy: activePricing.setBy,
+          reason: activePricing.reason,
+        },
+        "Current global pricing fetched successfully"
+      )
+    );
+  } catch (error: unknown) {
+    console.error("=== GET GLOBAL PRICING ERROR ===");
+    console.error(error);
+    console.error("================================");
+
+    if (error instanceof ApiError) {
+      throw error;
+    }
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error occurred";
+    throw new ApiError(500, `Failed to fetch global pricing: ${errorMessage}`);
+  }
 });

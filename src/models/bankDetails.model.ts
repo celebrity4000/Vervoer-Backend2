@@ -12,5 +12,5 @@ export const BankDetailsSchema = new Schema(
     accountHolderName: { type: String },
     branch: { type: String },
   },
-  { _id: false } 
+  { _id: false }
 );

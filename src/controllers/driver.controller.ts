@@ -81,6 +81,520 @@ const removePasswordFromDriver = (driver: any) => {
   return driverWithoutPassword;
 };
 
+// Update Vehicle Information
+export const updateVehicleInfo = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    console.log("=== UPDATE VEHICLE INFO DEBUG ===");
+    console.log("Request body:", req.body);
+    console.log("Request files:", req.files);
+    console.log("==================================");
+
+    const authResult = await verifyAuthentication(req);
+    
+    if (authResult.userType !== "driver") {
+      throw new ApiError(403, "Only drivers can update vehicle information");
+    }
+
+    const driverId = String(authResult.user._id);
+    console.log("Authenticated driver ID:", driverId);
+
+    // Parse vehicleInfo if it's a string
+    if (typeof req.body.vehicleInfo === "string") {
+      req.body.vehicleInfo = JSON.parse(req.body.vehicleInfo);
+    }
+
+    const { vehicleInfo } = req.body;
+
+    if (!vehicleInfo) {
+      throw new ApiError(400, "Vehicle information is required");
+    }
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      throw new ApiError(404, "Driver not found");
+    }
+
+    // Handle image uploads
+    const uploadedImages: any = {};
+    
+    const vehicleImageFields = [
+      "vehicleInspectionImage",
+      "vehicleInsuranceImage", 
+      "localCertificate"
+    ];
+
+    // Upload new images if provided
+    for (const field of vehicleImageFields) {
+      if (req.files && field in req.files) {
+        const file = (req.files as any)[field][0];
+        const result = await uploadToCloudinary(file.buffer);
+        uploadedImages[field] = result.secure_url;
+      }
+    }
+
+    // Update driver's vehicle information
+    const updatedVehicleInfo = {
+      vehicleBrand: vehicleInfo.vehicleBrand,
+      vehicleModel: vehicleInfo.vehicleModel,
+      vehicleYear: vehicleInfo.vehicleYear,
+      noOfDoors: vehicleInfo.noOfDoors,
+      vehicleColor: vehicleInfo.vehicleColor,
+      noOfSeats: vehicleInfo.noOfSeats,
+      noOfBooster: vehicleInfo.noOfBooster,
+      vehicleNumber: vehicleInfo.vehicleNumber,
+      registrationNumber: vehicleInfo.registrationNumber,
+      insuranceProviderCompany: vehicleInfo.insuranceProviderCompany,
+      insuranceNumber: vehicleInfo.insuranceNumber,
+      // Keep existing images or use new ones
+      vehicleInspectionImage: uploadedImages.vehicleInspectionImage || driver.vehicleInfo?.vehicleInspectionImage,
+      vehicleInsuranceImage: uploadedImages.vehicleInsuranceImage || driver.vehicleInfo?.vehicleInsuranceImage,
+      localCertificate: uploadedImages.localCertificate || driver.vehicleInfo?.localCertificate,
+    };
+
+    const updatedDriver = await Driver.findByIdAndUpdate(
+      driverId,
+      {
+        vehicleInfo: updatedVehicleInfo,
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedDriver) {
+      throw new ApiError(500, "Failed to update vehicle information");
+    }
+
+    const driverResponse = removePasswordFromDriver(updatedDriver);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { driver: driverResponse },
+        "Vehicle information updated successfully"
+      )
+    );
+
+  } catch (error: unknown) {
+    console.error("=== VEHICLE UPDATE ERROR ===");
+    console.error("Error:", error);
+    console.error("============================");
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Vehicle info update failed: ${errorMessage}`);
+  }
+});
+
+// update personal details, availability, and profile image
+export const updateDriverPersonalInfo = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const authResult = await verifyAuthentication(req);
+    
+    if (authResult.userType !== "driver") {
+      throw new ApiError(403, "Only drivers can update personal information");
+    }
+
+    const driverId = String(authResult.user._id);
+    
+    // Parse JSON fields if they're strings
+    if (typeof req.body.availability === "string") {
+      req.body.availability = JSON.parse(req.body.availability);
+    }
+    if (typeof req.body.backgroudCheck === "string") {
+      req.body.backgroudCheck = JSON.parse(req.body.backgroudCheck);
+    }
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      throw new ApiError(404, "Driver not found");
+    }
+
+    // Handle driver license image upload
+    let driverLicenseImage = driver.driverLicenseImage;
+    if (req.files && 'driverLicenseImage' in req.files) {
+      const file = (req.files as any).driverLicenseImage[0];
+      const result = await uploadToCloudinary(file.buffer);
+      driverLicenseImage = result.secure_url;
+    }
+
+    const updatedDriver = await Driver.findByIdAndUpdate(
+      driverId,
+      {
+        firstName: req.body.firstName,
+        middleName: req.body.middleName,
+        lastName: req.body.lastName,
+        email: req.body.email,
+        phoneNumber: req.body.phoneNumber,
+        licenseNumber: req.body.licenseNumber,
+        expirationDate: new Date(req.body.expirationDate),
+        driverLicenseImage: driverLicenseImage,
+        availability: req.body.availability,
+        kidsFriendly: req.body.kidsFriendly === 'true',
+        carSeatsAvailable: req.body.carSeatsAvailable === 'true',
+        backgroudCheck: req.body.backgroudCheck,
+        country: req.body.country,
+        state: req.body.state,
+        zipCode: req.body.zipCode,
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedDriver) {
+      throw new ApiError(500, "Failed to update driver information");
+    }
+
+    const driverResponse = removePasswordFromDriver(updatedDriver);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { driver: driverResponse },
+        "Driver personal information updated successfully"
+      )
+    );
+
+  } catch (error: unknown) {
+    console.error("Personal info update error:", error);
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Personal info update failed: ${errorMessage}`);
+  }
+});
+
+// bank details update
+export const createDriverBankDetails = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    console.log("=== CREATE BANK DETAILS (Registration) ===");
+    console.log("Request body:", req.body);
+    console.log("Request files:", req.files);
+    console.log("==========================================");
+
+    const authResult = await verifyAuthentication(req);
+    
+    if (authResult.userType !== "driver") {
+      throw new ApiError(403, "Only drivers can create bank details");
+    }
+
+    const driverId = String(authResult.user._id);
+    
+    // Validate required fields
+    const { accountHolderName, accountNumber, routingNumber, bankName } = req.body;
+    
+    if (!accountHolderName || !accountNumber || !routingNumber || !bankName) {
+      throw new ApiError(400, "All bank details fields are required");
+    }
+    
+    const driver = await Driver.findById(driverId);
+    
+    if (!driver) {
+      throw new ApiError(404, "Driver not found");
+    }
+
+    // Handle credit card image upload - required for registration
+    if (!req.files || !('creditCardImage' in req.files)) {
+      throw new ApiError(400, "Credit card image is required");
+    }
+
+    const file = (req.files as any).creditCardImage[0];
+    const result = await uploadToCloudinary(file.buffer);
+    const creditCardImage = result.secure_url;
+
+    // Create bank details
+    const bankDetails = {
+      accountHolderName,
+      accountNumber,
+      routingNumber,
+      bankName,
+      creditCardImage,
+    };
+
+    const updatedDriver = await Driver.findByIdAndUpdate(
+      driverId,
+      {
+        bankDetails: bankDetails,
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedDriver) {
+      throw new ApiError(500, "Failed to create bank details");
+    }
+
+    const driverResponse = removePasswordFromDriver(updatedDriver);
+
+    res.status(201).json(
+      new ApiResponse(
+        201,
+        { driver: driverResponse },
+        "Bank details created successfully"
+      )
+    );
+
+  } catch (error: unknown) {
+    console.error("=== BANK DETAILS CREATE ERROR ===");
+    console.error("Error:", error);
+    console.error("=================================");
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Bank details creation failed: ${errorMessage}`);
+  }
+});
+
+// Driver Attestation Controller
+export const submitDriverAttestation = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    console.log("=== SUBMIT DRIVER ATTESTATION DEBUG ===");
+    console.log("Request body:", req.body);
+    console.log("Request files:", req.files);
+    console.log("=======================================");
+
+    const authResult = await verifyAuthentication(req);
+    
+    if (authResult.userType !== "driver") {
+      throw new ApiError(403, "Only drivers can submit attestation");
+    }
+
+    const driverId = String(authResult.user._id);
+    console.log("Authenticated driver ID:", driverId);
+
+    // Parse attestation if it's a string (for multipart form data)
+    let attestationData = req.body;
+    if (typeof req.body.attestation === "string") {
+      attestationData = JSON.parse(req.body.attestation);
+    }
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      throw new ApiError(404, "Driver not found");
+    }
+
+    // Handle electronic signature upload
+    let electronicSignature = "";
+    if (req.files && 'electronicSignature' in req.files) {
+      const file = (req.files as any).electronicSignature[0];
+      const result = await uploadToCloudinary(file.buffer);
+      electronicSignature = result.secure_url;
+    } else {
+      throw new ApiError(400, "Electronic signature is required");
+    }
+
+    // Validate attestation data
+    const attestationSchema = z.object({
+      consentBackgroundCheck: z.coerce.boolean(),
+      completeASafetyHoldings: z.coerce.boolean(),
+      completeACheckInc: z.coerce.boolean(),
+      noDrivingUnderInfluence: z.coerce.boolean(),
+      noDiscriminateUser: z.coerce.boolean(),
+      willingVideoForSecurity: z.coerce.boolean(),
+      ongoingBackgroundAndLicenseCheck: z.coerce.boolean(),
+      obeyTrafficLaws: z.coerce.boolean(),
+      noAggressiveDriving: z.coerce.boolean(),
+      noUnsafeExperience: z.coerce.boolean(),
+      agreeToTerms: z.coerce.boolean(),
+      keepVehicleGoodCondition: z.coerce.boolean(),
+      completeOnboarding: z.coerce.boolean(),
+      noFightWithUser: z.coerce.boolean(),
+      infoProvidedIsTrue: z.coerce.boolean(),
+    });
+
+    const validatedAttestation = attestationSchema.parse(attestationData);
+
+    // Check if all required attestations are true
+    const allAttestationsTrue = Object.values(validatedAttestation).every(value => value === true);
+    
+    if (!allAttestationsTrue) {
+      throw new ApiError(400, "All attestation items must be accepted to continue");
+    }
+
+    // Update driver with attestation data
+    const updatedDriver = await Driver.findByIdAndUpdate(
+      driverId,
+      {
+        attestation: {
+          ...validatedAttestation,
+          electronicSignature: electronicSignature,
+          attestationDate: new Date().toISOString(),
+        }
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedDriver) {
+      throw new ApiError(500, "Failed to update driver attestation");
+    }
+
+    const driverResponse = removePasswordFromDriver(updatedDriver);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { driver: driverResponse },
+        "Driver attestation submitted successfully"
+      )
+    );
+
+  } catch (error: unknown) {
+    console.error("=== ATTESTATION SUBMISSION ERROR ===");
+    console.error("Error:", error);
+    console.error("===================================");
+    
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, `Validation failed: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
+    }
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Attestation submission failed: ${errorMessage}`);
+  }
+});
+
+// Get driver attestation status (optional - to check if already submitted)
+export const getDriverAttestationStatus = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const authResult = await verifyAuthentication(req);
+    
+    if (authResult.userType !== "driver") {
+      throw new ApiError(403, "Only drivers can access attestation status");
+    }
+
+    const driverId = String(authResult.user._id);
+    
+    const driver = await Driver.findById(driverId).select('attestation');
+    if (!driver) {
+      throw new ApiError(404, "Driver not found");
+    }
+
+    // Check if attestation is completed
+    const isAttestationCompleted = driver.attestation && 
+      driver.attestation.electronicSignature && 
+      driver.attestation.attestationDate &&
+      Object.values(driver.attestation).filter(val => typeof val === 'boolean').every(val => val === true);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { 
+          attestation: driver.attestation,
+          isCompleted: isAttestationCompleted 
+        },
+        "Attestation status retrieved successfully"
+      )
+    );
+
+  } catch (error: unknown) {
+    console.error("Attestation status error:", error);
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Failed to get attestation status: ${errorMessage}`);
+  }
+});
+
+export const uploadDriverProfilePhoto = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    console.log("=== UPLOAD DRIVER PROFILE PHOTO DEBUG ===");
+    console.log("Request files:", req.files);
+    console.log("==========================================");
+
+    const authResult = await verifyAuthentication(req);
+    
+    if (authResult.userType !== "driver") {
+      throw new ApiError(403, "Only drivers can upload profile photos");
+    }
+
+    const driverId = String(authResult.user._id);
+    console.log("Authenticated driver ID:", driverId);
+
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      throw new ApiError(404, "Driver not found");
+    }
+
+    // Check if profile image is provided
+    if (!req.files || !('profileImage' in req.files)) {
+      throw new ApiError(400, "Profile image is required");
+    }
+
+    const file = (req.files as any).profileImage[0];
+    
+    // Validate file type
+    const allowedTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.mimetype)) {
+      throw new ApiError(400, "Invalid file type. Only JPEG, PNG, and WebP are allowed");
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      throw new ApiError(400, "File too large. Maximum size is 5MB");
+    }
+
+    console.log("Uploading to Cloudinary...");
+    const result = await uploadToCloudinary(file.buffer);
+    
+    if (!result || !result.secure_url) {
+      throw new ApiError(500, "Failed to upload image to cloud storage");
+    }
+
+    // Update driver's profile image
+    const updatedDriver = await Driver.findByIdAndUpdate(
+      driverId,
+      {
+        profileImage: result.secure_url,
+        // Also update driveProfileImage if it's the same field
+        driveProfileImage: result.secure_url,
+        updatedAt: new Date(),
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedDriver) {
+      throw new ApiError(500, "Failed to update driver profile");
+    }
+
+    const driverResponse = removePasswordFromDriver(updatedDriver);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { 
+          driver: driverResponse,
+          profileImageUrl: result.secure_url,
+        },
+        "Profile photo uploaded successfully"
+      )
+    );
+
+  } catch (error: unknown) {
+    console.error("=== PROFILE PHOTO UPLOAD ERROR ===");
+    console.error("Error:", error);
+    console.error("==================================");
+    
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+    throw new ApiError(500, `Profile photo upload failed: ${errorMessage}`);
+  }
+});
+
+
 export const registerDriverBasic = asyncHandler(async (req: Request, res: Response) => {
   try {
     console.log("=== REGISTER DRIVER BASIC DEBUG ===");
