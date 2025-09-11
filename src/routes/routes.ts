@@ -13,10 +13,12 @@ import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 import { getCurrentSession } from "../controllers/merchant.controller.js";
 import {PlaceDryCleanerOrder} from "../controllers/DryCleanerBooking.controller.js";
-import {  cancelBookingRequest, completeTrip, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getUserBookingRequests, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip } from "../controllers/driverBooking.controller.js";
+import {  cancelBooking, cancelBookingRequest, completeTrip, confirmPayment, createBooking, createPaymentIntent, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getBookingDetails, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getOrderReceipt, getUserBookingRequests, getUserBookings, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip, updatePickupAddress,userBokinghistory,generateBookingQRCode } from "../controllers/driverBooking.controller.js";
 
 const router = Router();
 
+
+router.get("/my-bookings", authenticate, userBokinghistory);
 // User routes
 router.post("/register", asyncHandler(registerUser));
 router.post("/verify-otp", asyncHandler(verifyOtp));
@@ -120,7 +122,7 @@ router.patch("/user/cancel/:id", cancelBookingRequest);
 router.get("/driver/requests", getDriverBookingRequests);
 
 // Respond to a booking request (accept/reject)
-router.patch("/driver/respond", respondToBookingRequest);
+router.put("/driver/respond", respondToBookingRequest);
 
 // Get driver's scheduled bookings (today/upcoming)
 router.get("/driver/scheduled", getDriverScheduledBookings);
@@ -173,5 +175,20 @@ router.post("/social-register", socialRegister);
 router.get("/current-session", getCurrentSession);
 // query route
 router.post("/submit-query", authenticate, submitQueryToAdmin);
+
+router.post("/create", createBooking);                 // Create a new booking
+router.get("/", getUserBookings);                      // Get all user bookings
+router.get("/:bookingId", getBookingDetails);          // Get booking details
+router.post("/:bookingId/cancel", cancelBooking);      // Cancel booking
+
+router.post("/payment-intent", createPaymentIntent);   // Create Stripe payment intent
+router.post("/confirm-payment", confirmPayment);       // Confirm Stripe payment
+
+router.get("/my-bookings", authenticate, userBokinghistory);
+    // Specific route first
+router.get('/orders/:orderId/receipt', authenticate,getOrderReceipt);        // Specific pattern
+router.put('/bookings/:bookingId/pickup-address',authenticate, updatePickupAddress); // Parameterized route last
+router.get('/bookings/:id/generate-qr', authenticate, generateBookingQRCode); 
 export default router;
+
 

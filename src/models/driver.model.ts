@@ -44,7 +44,7 @@ export const UserBaseSchemaFields = {
 
 // Driver Interface
 export interface IDriver extends Document {
-  
+   _id: mongoose.Types.ObjectId;
   phoneNumber: string;
   password: string;
   firstName: string;
