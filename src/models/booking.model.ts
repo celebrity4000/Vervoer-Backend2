@@ -41,6 +41,7 @@ export interface IBooking extends Document {
   distance: number;
   time: number;
   price: number;
+  deliveryCharge: number; // New field: separate delivery charge at booking level
   status: 'pending' | 'accepted' | 'active' | 'completed' | 'cancelled' | 'rejected';
   bookingType: 'pickup' | 'delivery';
   message?: string;
@@ -126,6 +127,7 @@ const BookingSchema = new Schema<IBooking>({
   distance: { type: Number, required: true, min: 0 },
   time: { type: Number, required: true, min: 0 },
   price: { type: Number, required: true, min: 0 },
+  deliveryCharge: { type: Number, required: true, min: 0 }, // New field: separate delivery charge
   status: {
     type: String,
     enum: ['pending', 'accepted', 'active', 'completed', 'cancelled', 'rejected'],

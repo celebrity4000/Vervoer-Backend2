@@ -13,7 +13,7 @@ import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 import { getCurrentSession } from "../controllers/merchant.controller.js";
 import {PlaceDryCleanerOrder} from "../controllers/DryCleanerBooking.controller.js";
-import {  cancelBooking, cancelBookingRequest, completeTrip, confirmPayment, createBooking, createPaymentIntent, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getBookingDetails, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getOrderReceipt, getUserBookingRequests, getUserBookings, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip, updatePickupAddress,userBokinghistory,generateBookingQRCode } from "../controllers/driverBooking.controller.js";
+import {  cancelBooking, cancelBookingRequest, completeTrip, confirmPayment, createBooking, createPaymentIntent, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getBookingDetails, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getOrderReceipt, getUserBookingRequests, getUserBookings, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip, updatePickupAddress,userBokinghistory,generateBookingQRCode, getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, sendTestNotification, deleteAllNotifications, updateBookingStatus, driverCancelBooking } from "../controllers/driverBooking.controller.js";
 
 const router = Router();
 
@@ -178,8 +178,7 @@ router.post("/submit-query", authenticate, submitQueryToAdmin);
 
 router.post("/create", createBooking);                 // Create a new booking
 router.get("/", getUserBookings);                      // Get all user bookings
-router.get("/:bookingId", getBookingDetails);          // Get booking details
-router.post("/:bookingId/cancel", cancelBooking);      // Cancel booking
+
 
 router.post("/payment-intent", createPaymentIntent);   // Create Stripe payment intent
 router.post("/confirm-payment", confirmPayment);       // Confirm Stripe payment
@@ -189,6 +188,31 @@ router.get("/my-bookings", authenticate, userBokinghistory);
 router.get('/orders/:orderId/receipt', authenticate,getOrderReceipt);        // Specific pattern
 router.put('/bookings/:bookingId/pickup-address',authenticate, updatePickupAddress); // Parameterized route last
 router.get('/bookings/:id/generate-qr', authenticate, generateBookingQRCode); 
+
+
+// Get user notifications
+router.get('/notifications',authenticate, getUserNotifications);
+
+// Mark all notifications as read
+router.put('/mark-all-read', markAllNotificationsAsRead);
+
+
+// Send test notification (development only)
+router.post('/test', sendTestNotification);
+
+
+// Delete notification
+router.delete('/delete-all', deleteAllNotifications);
+
+// Mark notification as read
+
+
+router.put('/update-status', updateBookingStatus);
+router.put('/driver-cancel', driverCancelBooking); 
+router.put('/:notificationId/read', markNotificationAsRead);
+router.get("/:bookingId", getBookingDetails);          // Get booking details
+router.post("/:bookingId/cancel", cancelBooking);      // Cancel booking
+
 export default router;
 
 
