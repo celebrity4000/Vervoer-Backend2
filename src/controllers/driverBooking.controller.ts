@@ -1844,9 +1844,15 @@ interface PopulatedBooking extends mongoose.Document {
   cancelledAt?: Date;
   pickupCompletedAt?: Date;
   dropoffCompletedAt?: Date;
+  pickup?: string;
+  dropOff?: string;
+  deliveryCharge?: number; // Fixed: Changed from string to number to match IBooking
+  miles?: string;
+  time?: string;
+  paymentStatus?: string;
+  paymentIntentId?: string;
 }
 
-// Extended user type to match your existing pattern
 interface AuthUser {
   _id: mongoose.Types.ObjectId;
   name?: string;
@@ -1862,8 +1868,12 @@ interface AuthResult {
   userType: string;
 }
 
-// Extended user type to match your existing pattern
-
+type NotificationType = 
+  | 'booking_accepted' 
+  | 'booking_rejected' 
+  | 'driver_update' 
+  | 'payment' 
+  | 'general';
 
 // Helper function to safely parse query parameters
 const parseQueryParam = (param: any, defaultValue: number): number => {
@@ -1893,7 +1903,7 @@ export const getUserNotifications = asyncHandler(async (req: Request, res: Respo
   
   const { limit, offset, unreadOnly } = req.query;
 
-  const result = await NotificationService.getUserNotifications(userId, {
+  const result = await NotificationService.getUserNotifications(userId.toString(), {
     limit: parseQueryParam(limit, 50),
     offset: parseQueryParam(offset, 0),
     unreadOnly: parseQueryBoolean(unreadOnly, false)
@@ -1916,7 +1926,7 @@ export const markNotificationAsRead = asyncHandler(async (req: Request, res: Res
     throw new ApiError(400, 'Invalid notification ID format');
   }
 
-  const notification = await NotificationService.markAsRead(notificationId, userId);
+  const notification = await NotificationService.markAsRead(notificationId, userId.toString());
 
   res.status(200).json(
     new ApiResponse(200, notification, 'Notification marked as read')
@@ -1930,7 +1940,7 @@ export const markAllNotificationsAsRead = asyncHandler(async (req: Request, res:
   const authResult = await verifyAuthentication(req) as AuthResult;
   const userId = authResult.user._id;
 
-  const result = await NotificationService.markAllAsRead(userId);
+  const result = await NotificationService.markAllAsRead(userId.toString());
 
   res.status(200).json(
     new ApiResponse(200, result, 'All notifications marked as read')
@@ -1945,13 +1955,12 @@ export const deleteAllNotifications = asyncHandler(async (req: Request, res: Res
   const userId = authResult.user._id;
 
   // Call your service method to delete all notifications for this user
-  await NotificationService.deleteAllNotifications(userId);
+  await NotificationService.deleteAllNotifications(userId.toString());
 
   res.status(200).json(
     new ApiResponse(200, null, 'All notifications deleted successfully')
   );
 });
-
 
 /**
  * Send test notification (for development)
@@ -1963,10 +1972,10 @@ export const sendTestNotification = asyncHandler(async (req: Request, res: Respo
   const { type = 'general', title, message } = req.body;
 
   const notification = await NotificationService.createNotification({
-    userId,
+    userId: userId.toString(),
     title: title || 'Test Notification',
     message: message || 'This is a test notification.',
-    type,
+    type: type as NotificationType,
     priority: 'normal'
   });
 
@@ -1975,11 +1984,12 @@ export const sendTestNotification = asyncHandler(async (req: Request, res: Respo
   );
 });
 
+// Simple booking response handler - rejection makes booking available to other drivers
 export const respondToBookingRequest = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req) as AuthResult;
     if (authResult.userType !== "driver") {
-      throw new ApiError(403, "Only drivers can accept booking requests");
+      throw new ApiError(403, "Only drivers can respond to booking requests");
     }
    
     const driverId = authResult.user._id;
@@ -2012,27 +2022,23 @@ export const respondToBookingRequest = asyncHandler(
           {
             new: true
           }
-        ).populate('user', 'name email') as PopulatedBooking | null;
-        // CHANGED: .populate('userId', 'name email') → .populate('user', 'name email')
-        // This matches your schema: user: { type: Schema.Types.ObjectId, ref: "User", required: true }
+        ).populate('user', 'name email') as unknown as PopulatedBooking | null;
 
         if (!updatedBooking) {
           throw new ApiError(404, "Pending booking request not found or already processed");
         }
 
         // Send acceptance notification to customer
-        // CHANGED: Access the populated user field correctly
         if (updatedBooking.user) {
           try {
             await NotificationService.sendBookingAcceptedNotification(
-              updatedBooking.user._id,
+              updatedBooking.user._id.toString(),
               bookingId,
               driverName
             );
             console.log('Acceptance notification sent to customer:', updatedBooking.user._id);
           } catch (notificationError) {
             console.error('Failed to send acceptance notification:', notificationError);
-            // Don't fail the entire operation if notification fails
           }
         }
 
@@ -2050,53 +2056,43 @@ export const respondToBookingRequest = asyncHandler(
         );
 
       } else if (response === 'reject') {
-        // Reject the booking
-        updatedBooking = await Booking.findOneAndUpdate(
-          {
-            _id: bookingId,
-            status: "pending"
-          },
-          {
-            status: "rejected",
-            rejectedAt: new Date(),
-            rejectionReason: rejectionReason || 'Driver unavailable'
-          },
-          {
-            new: true
-          }
-        ).populate('user', 'name email') as PopulatedBooking | null;
-        // CHANGED: .populate('userId', 'name email') → .populate('user', 'name email')
+        // Simply keep the booking as "pending" so other drivers can pick it up
+        const booking = await Booking.findById(bookingId).populate('user', 'name email') as unknown as PopulatedBooking | null;
 
-        if (!updatedBooking) {
-          throw new ApiError(404, "Pending booking request not found or already processed");
+        if (!booking) {
+          throw new ApiError(404, "Booking not found");
         }
 
-        // Send rejection notification to customer
-        // CHANGED: Access the populated user field correctly
-        if (updatedBooking.user) {
+        if (booking.status !== "pending") {
+          throw new ApiError(400, "Booking is no longer available for rejection");
+        }
+
+        // Send rejection notification to customer (but keep booking pending for others)
+        if (booking.user) {
           try {
             await NotificationService.sendBookingRejectedNotification(
-              updatedBooking.user._id,
+              booking.user._id.toString(),
               bookingId,
-              rejectionReason || 'Driver unavailable'
+              `${driverName} declined your request, but other drivers can still accept it.`
             );
-            console.log('Rejection notification sent to customer:', updatedBooking.user._id);
+            console.log('Rejection notification sent to customer:', booking.user._id);
           } catch (notificationError) {
             console.error('Failed to send rejection notification:', notificationError);
-            // Don't fail the entire operation if notification fails
           }
         }
+
+        // Notify other available drivers about this booking
+        await notifyOtherAvailableDrivers(booking, driverId.toString());
 
         res.status(200).json(
           new ApiResponse(
             200,
             {
               bookingId: bookingId,
-              status: "rejected",
-              rejectedAt: updatedBooking.rejectedAt,
-              rejectionReason: updatedBooking.rejectionReason
+              status: "pending", // Status remains pending for other drivers
+              message: "Booking rejected but remains available for other drivers"
             },
-            "Booking request rejected. Customer has been notified."
+            "Booking request rejected. The booking remains available for other drivers."
           )
         );
       }
@@ -2116,16 +2112,60 @@ export const respondToBookingRequest = asyncHandler(
   }
 );
 
+// Fixed function to notify other available drivers
+const notifyOtherAvailableDrivers = async (booking: PopulatedBooking, excludeDriverId: string) => {
+  try {
+    // Find all active drivers except the one who just rejected
+    const availableDrivers = await User.find({
+      userType: 'driver',
+      isActive: true,
+      isAvailable: true,
+      _id: { $ne: excludeDriverId } // Exclude the driver who just rejected
+    });
 
+    console.log(`Found ${availableDrivers.length} other available drivers for booking ${booking._id}`);
 
+    // Send notifications to available drivers
+    const notificationPromises = availableDrivers.map(async (driver: any) => {
+      try {
+        await NotificationService.createNotification({
+          userId: driver._id.toString(),
+          title: 'Booking Available',
+          message: `A dry cleaning pickup is available: ${booking.pickup || 'Location'} - ${booking.deliveryCharge || '22.30'}`,
+          type: 'general' as NotificationType, // Changed from 'booking_available' to 'general'
+          priority: 'high',
+          data: {
+            bookingId: booking._id.toString(),
+            pickup: booking.pickup,
+            dropOff: booking.dropOff,
+            deliveryCharge: booking.deliveryCharge,
+            miles: booking.miles,
+            time: booking.time,
+            customerName: booking.user?.name
+          }
+        });
 
+        console.log(`Notification sent to driver ${driver._id} for booking ${booking._id}`);
+      } catch (error) {
+        console.error(`Failed to notify driver ${driver._id}:`, error);
+      }
+    });
 
+    await Promise.all(notificationPromises);
+    
+    return {
+      success: true,
+      notifiedDrivers: availableDrivers.length
+    };
 
-/**
- * Update booking status - matches your existing controller pattern
- */
-
-
+  } catch (error) {
+    console.error('Error notifying other available drivers:', error);
+    return {
+      success: false,
+      error: (error as Error).message
+    };
+  }
+};
 
 /**
  * Update booking status - matches your existing controller pattern
@@ -2262,7 +2302,7 @@ export const updateBookingStatus = asyncHandler(async (req: Request, res: Respon
       bookingId,
       updateData,
       { new: true }
-    ).populate('user', 'name email') as PopulatedBooking;
+    ).populate('user', 'name email') as unknown as PopulatedBooking;
 
     if (!updatedBooking) {
       throw new ApiError(404, 'Failed to update booking');
@@ -2330,16 +2370,16 @@ const sendStatusChangeNotification = async (
 
   // Check if you have specific notification methods like in your existing code
   if (status === 'accepted' && typeof NotificationService.sendBookingAcceptedNotification === 'function') {
-    await NotificationService.sendBookingAcceptedNotification(userId, bookingId, driverName);
+    await NotificationService.sendBookingAcceptedNotification(userId.toString(), bookingId, driverName);
   } else if (status === 'rejected' && typeof NotificationService.sendBookingRejectedNotification === 'function') {
-    await NotificationService.sendBookingRejectedNotification(userId, bookingId, driverName);
+    await NotificationService.sendBookingRejectedNotification(userId.toString(), bookingId, driverName);
   } else {
     // Use generic createNotification method
     await NotificationService.createNotification({
-      userId,
+      userId: userId.toString(),
       title: notificationData.title,
       message: notificationData.message,
-      type: notificationData.type,
+      type: notificationData.type as NotificationType,
       priority: notificationData.priority,
       data: {
         bookingId,
@@ -2355,7 +2395,12 @@ const sendStatusChangeNotification = async (
  * Get notification data for status
  */
 const getNotificationForStatus = (status: string, driverName: string) => {
-  const notifications: Record<string, any> = {
+  const notifications: Record<string, {
+    title: string;
+    message: string;
+    type: NotificationType;
+    priority: 'high' | 'normal' | 'low';
+  }> = {
     'accepted': {
       title: 'Booking Accepted!',
       message: `Your dry cleaning pickup has been accepted by ${driverName}. They will arrive shortly.`,
@@ -2427,14 +2472,14 @@ const getStatusUpdateMessage = (status: string): string => {
  */
 export const driverCancelBooking = asyncHandler(async (req: Request, res: Response) => {
   const authResult = await verifyAuthentication(req) as AuthResult;
-  
+ 
   if (authResult.userType !== "driver") {
     throw new ApiError(403, "Only drivers can cancel bookings using this endpoint");
   }
-  
+ 
   const driverId = authResult.user._id;
-  const { 
-    bookingId, 
+  const {
+    bookingId,
     cancellationReason,
     driverName
   } = req.body;
@@ -2447,7 +2492,7 @@ export const driverCancelBooking = asyncHandler(async (req: Request, res: Respon
     const existingBooking = await Booking.findOne({
       _id: bookingId,
       driver: driverId
-    }).populate('user', 'name email');
+    }).populate('user', 'name email') as PopulatedBooking | null;
 
     if (!existingBooking) {
       throw new ApiError(404, 'Booking not found or not assigned to you');
@@ -2458,11 +2503,12 @@ export const driverCancelBooking = asyncHandler(async (req: Request, res: Respon
       throw new ApiError(400, `Cannot cancel booking with status: ${existingBooking.status}`);
     }
 
+    // Make available to other drivers instead of cancelling
     const updateData = {
-      status: 'cancelled',
+      status: 'pending', // Make it available again
+      driver: null, // Remove current driver assignment
       cancelledAt: new Date(),
-      cancellationReason: cancellationReason || 'Driver cancelled the pickup',
-      driver: null, // Remove driver assignment
+      cancellationReason: cancellationReason || 'Driver cancelled - now available for others',
       updatedAt: new Date()
     };
 
@@ -2470,30 +2516,33 @@ export const driverCancelBooking = asyncHandler(async (req: Request, res: Respon
       bookingId,
       updateData,
       { new: true }
-    ).populate('user', 'name email') as PopulatedBooking;
+    ).populate('user', 'name email') as unknown as PopulatedBooking;
 
-    // Send cancellation notification to customer
+    // Send notification to customer
     if (updatedBooking?.user) {
       try {
         await NotificationService.createNotification({
-          userId: updatedBooking.user._id,
-          title: 'Pickup Cancelled',
-          message: `Your dry cleaning pickup has been cancelled by ${driverName || 'the driver'}. Please book another pickup.`,
-          type: 'driver_update',
+          userId: updatedBooking.user._id.toString(),
+          title: 'Driver Changed',
+          message: `${driverName || 'Your driver'} had to cancel, but we're finding you another driver. Your booking is still active.`,
+          type: 'driver_update' as NotificationType,
           priority: 'high',
           data: {
-            bookingId: updatedBooking._id,
+            bookingId: updatedBooking._id.toString(),
             reason: cancellationReason,
             cancelledBy: 'driver',
+            status: 'finding_new_driver',
             timestamp: new Date().toISOString()
           }
         });
         console.log('Driver cancellation notification sent to customer:', updatedBooking.user._id);
       } catch (notificationError) {
         console.error('Failed to send driver cancellation notification:', notificationError);
-        // Don't fail the entire operation if notification fails
       }
     }
+
+    // Notify other available drivers about this booking
+    await notifyOtherAvailableDrivers(updatedBooking, driverId.toString());
 
     res.status(200).json(
       new ApiResponse(
@@ -2504,17 +2553,17 @@ export const driverCancelBooking = asyncHandler(async (req: Request, res: Respon
           cancelledAt: updatedBooking.cancelledAt,
           cancellationReason: updatedBooking.cancellationReason
         },
-        'Pickup cancelled successfully. Customer has been notified and can book with another driver.'
+        'Booking cancelled successfully. Other drivers have been notified and can accept this booking.'
       )
     );
 
   } catch (error) {
     console.error('Driver cancel booking error:', error);
-    
+   
     if (error instanceof ApiError) {
       throw error;
     }
-    
+   
     throw new ApiError(
       500,
       `Failed to cancel booking: ${(error as Error)?.message || 'Unknown error'}`
@@ -2523,8 +2572,7 @@ export const driverCancelBooking = asyncHandler(async (req: Request, res: Respon
 });
 
 /**
- * Your existing user cancel booking with refund processing
- * This should be uncommented and used for user cancellations
+ * User cancel booking with refund processing
  */
 export const cancelBooking = asyncHandler(async (req: Request, res: Response) => {
   const authResult = await verifyAuthentication(req) as AuthResult;
