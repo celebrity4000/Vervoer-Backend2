@@ -36,25 +36,31 @@ export const registerUser = async (
       country,
       state,
       zipCode,
-      userType, 
+      userType,
     } = registerUserSchema.parse(req.body);
 
-    // const existingUser = await User.findOne({ phoneNumber });
-    // if (existingUser) {
-    //   res
-    //     .status(400)
-    //     .json({ success: false, message: "Phone number already registered" });
-    //   return;
-    
-    if(!password ){
-      throw new ApiError(400, "PASSWORD_REQUIRED") ;
-        }    
+    if (!password) {
+      throw new ApiError(400, "PASSWORD_REQUIRED");
+    }
+
+    let existingUser = null;
+    if (userType === "merchant") {
+      existingUser = await Merchant.findOne({ $or: [{ phoneNumber }, { email }] });
+    } else if (userType === "driver") {
+      existingUser = await Driver.findOne({ $or: [{ phoneNumber }, { email }] });
+    } else {
+      existingUser = await User.findOne({ $or: [{ phoneNumber }, { email }] });
+    }
+
+    if (existingUser) {
+      throw new ApiError(400, "USER_ALREADY_EXISTS");
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
     const otp = generateOTP();
     const otpExpiry = getOtpExpiry();
 
     let newUser = null;
-
     if (userType === "merchant") {
       newUser = await Merchant.create({
         phoneNumber,
@@ -84,7 +90,6 @@ export const registerUser = async (
         otpExpiry,
       });
     } else {
-      // Regular user 
       newUser = await User.create({
         phoneNumber,
         password: hashedPassword,
@@ -100,18 +105,33 @@ export const registerUser = async (
       });
     }
 
-    await sendEmail(email, "Your Registration OTP", `Your OTP is: ${otp}`);
+    sendEmail(
+      email,
+      "Your Registration OTP",
+      `Your OTP is: ${otp}. This OTP will expire in 5 minutes.`
+    ).catch((error) => {
+      console.error("Failed to send OTP email:", error);
+    });
 
-    const token = jwtEncode({ userId: newUser._id, userType: userType });
+    const token = jwtEncode({ 
+      userId: newUser._id, 
+      userType: userType 
+    });
 
     res.status(201).json({
       success: true,
       message: "User registered successfully, OTP sent to email",
       token,
+      data: {
+        userId: newUser._id,
+        email: newUser.email,
+        phoneNumber: newUser.phoneNumber,
+        userType: userType,
+      },
     });
   } catch (error) {
-    if(error instanceof z.ZodError){
-      throw new ApiError(400, "INVALID_DATA") ;
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "INVALID_DATA");
     }
     next(error);
   }
@@ -121,47 +141,54 @@ export const verifyOtp = async (
   req: Request,
   res: Response,
   next: NextFunction
-) => {
+): Promise<void> => {
   try {
     const { otp } = req.body;
-    const user = await verifyAuthentication(req).then(e=>e?.user) ;
+
+    if (!otp) {
+      throw new ApiError(400, "OTP_REQUIRED");
+    }
+
+    const authResult = await verifyAuthentication(req);
+    const user = authResult?.user;
+
     if (!user) {
-      res
-      .status(404)
-      .json({ success: false, message: "User not found" });
-      return ;
+      throw new ApiError(404, "USER_NOT_FOUND");
     }
 
     if (user.isVerified) {
-      res
-      .status(400)
-      .json({ success: false, message: "User already verified" });
-      return
+      throw new ApiError(400, "USER_ALREADY_VERIFIED");
     }
 
     if (user.otp !== otp) {
-      res.status(400).json({ success: false, message: "Invalid OTP" });
-      return
+      throw new ApiError(400, "INVALID_OTP");
     }
 
     if (user.otpExpiry && user.otpExpiry < new Date()) {
-      res.status(400).json({ success: false, message: "OTP expired" });
-      return ;
+      throw new ApiError(400, "OTP_EXPIRED");
     }
 
+    // Mark user as verified
     user.isVerified = true;
     user.otp = undefined;
     user.otpExpiry = undefined;
     await user.save();
 
-    res
-      .status(200)
-      .json({ success: true, message: "Account verified successfully" });
+    res.status(200).json({
+      success: true,
+      message: "Account verified successfully",
+      data: {
+        userId: user._id,
+        email: user.email,
+        phoneNumber: user.phoneNumber,
+        isVerified: user.isVerified,
+      },
+    });
   } catch (error) {
-    if(error instanceof jwt.TokenExpiredError){
-      throw new ApiError(400, "TOKEN_EXPIRED")
-    }else if (error instanceof jwt.JsonWebTokenError){
-      throw new ApiError(401 , "UNAUTHORIZED_ACCESS") ;
+    if (error instanceof jwt.TokenExpiredError) {
+      throw new ApiError(401, "TOKEN_EXPIRED");
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      throw new ApiError(401, "UNAUTHORIZED_ACCESS");
     }
     next(error);
   }

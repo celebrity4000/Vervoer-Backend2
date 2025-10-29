@@ -1,11 +1,21 @@
-import jwt from "jsonwebtoken" ;
+import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET || "fjdjkfhsfsaf" ;
+const JWT_SECRET = process.env.ACCESS_SECRET_TOKEN || "fjdjkfhsfsaf";
 
-export function jwtEncode(data : object|string , options: jwt.SignOptions = {expiresIn : "30D"}){
-    return jwt.sign(data, JWT_SECRET, options)
+export function jwtEncode(
+  data: object | string,
+  options?: jwt.SignOptions
+) {
+  const defaultExpiry = process.env.ACCESS_TOKEN_EXPIRY || "1d";
+
+  console.log("JWT Encode - Using expiry:", options?.expiresIn || defaultExpiry); 
+
+  return jwt.sign(data, JWT_SECRET, {
+    expiresIn: defaultExpiry,
+    ...options,
+  } as jwt.SignOptions);
 }
 
-export function jwtDecode(token : string){
-    return jwt.verify(token, JWT_SECRET) as object | string ;
+export function jwtDecode(token: string) {
+  return jwt.verify(token, JWT_SECRET) as object | string;
 }

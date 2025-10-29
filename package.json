@@ -33,6 +33,7 @@
     "typescript-eslint": "^8.35.0"
   },
   "dependencies": {
+    "@sendgrid/mail": "^8.1.6",
     "@types/nodemailer": "^6.4.17",
     "axios": "^1.10.0",
     "bcryptjs": "^3.0.2",
