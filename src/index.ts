@@ -52,6 +52,33 @@ connectDB()
     console.error("MongoDB connection error:", err);
   });
 
+  app.get("/api/getStripePublicKey", (req, res) => {
+  try {
+    if (!StripePublicKey) {
+      return res.status(500).json(
+        new ApiResponse(500, null, "Stripe configuration error")
+      );
+    }
+    
+    res.status(200).json(
+      new ApiResponse(200, { 
+        key: StripePublicKey,
+        keyType: StripePublicKey.startsWith('pk_test_') ? 'test' : 'live',
+        // Add version to force cache invalidation
+        version: '2.0',  // Increment this when key changes
+        lastUpdated: new Date().toISOString(),
+        // Return key hash for verification
+        keyHash: StripePublicKey.slice(-10),
+      })
+    );
+  } catch (error) {
+    console.error('Error fetching Stripe key:', error);
+    res.status(500).json(
+      new ApiResponse(500, null, "Failed to retrieve Stripe key")
+    );
+  }
+});
+
 // Socket.io logic
 io.on("connection", (socket) => {
   console.log("User connected:", socket.id);

@@ -274,7 +274,6 @@ BookingSchema.virtual('orderSummary').get(function(this: IBooking) {
   return `${itemCount} item type${itemCount > 1 ? 's' : ''}, ${totalQuantity} total item${totalQuantity > 1 ? 's' : ''}`;
 });
 
-// Virtual for booking duration (if completed)
 BookingSchema.virtual('duration').get(function(this: IBooking) {
   if (this.startedAt && this.completedAt) {
     return this.completedAt.getTime() - this.startedAt.getTime();
