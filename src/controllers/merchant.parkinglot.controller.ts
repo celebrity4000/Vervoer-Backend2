@@ -519,30 +519,45 @@ export const getParkingLotbyId = asyncHandler(async (req,res)=>{
   else throw new ApiError(400,"NOT_FOUND");
 })
 export const deleteParking = asyncHandler(
-  async (req,res)=>{
+  async (req, res) => {
     try {
-      const lotId = z.string().parse(req.query.id) ;
-      const authUser = await verifyAuthentication(req) ;
-      if(!authUser?.user || authUser.userType!== "merchant" ) throw new ApiError(403,"UNKNOWN_USER") ;
+      // ✅ READ FROM PARAMS (NOT QUERY)
+      const lotId = req.params.id;
+
+      // ✅ Validate Mongo ObjectId
+      if (!lotId || !mongoose.Types.ObjectId.isValid(lotId)) {
+        throw new ApiError(400, "INVALID_ID");
+      }
+
+      const authUser = await verifyAuthentication(req);
+      if (!authUser?.user || authUser.userType !== "merchant") {
+        throw new ApiError(403, "UNKNOWN_USER");
+      }
+
       const del = await ParkingLotModel.findOneAndDelete({
-        _id : lotId,
-        owner : authUser?.user
-      })
-      if(del){
-        res.status(200).json(new ApiResponse(200,del,"DELETE SUCCESSFUL"))
-      }else {
-        if(await ParkingLotModel.findById(lotId)) 
-          throw new ApiError(403,"ACCESS_DENIED");
-        else throw new ApiError(404,"NOT_FOUND");
+        _id: lotId,
+        owner: authUser.user,
+      });
+
+      if (del) {
+        return res
+          .status(200)
+          .json(new ApiResponse(200, del, "DELETE_SUCCESSFUL"));
       }
+
+      // If not deleted, check reason
+      if (await ParkingLotModel.findById(lotId)) {
+        throw new ApiError(403, "ACCESS_DENIED");
+      } else {
+        throw new ApiError(404, "NOT_FOUND");
+      }
+
     } catch (error) {
-      if(error instanceof z.ZodError){
-        throw new ApiError(400,"INVALID_ID");
-      }
-      else throw error ;
+      throw error;
     }
   }
-)
+);
+
 
 export const getLotBookingById = asyncHandler(async (req: Request, res: Response) => {
   try {
