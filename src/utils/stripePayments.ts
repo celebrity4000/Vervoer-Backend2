@@ -1,4 +1,3 @@
-
 import Stripe from "stripe";
 
 if (!process.env.STRIPE_SECRET_KEY) {
@@ -14,6 +13,7 @@ export interface StripeIntentData {
     paymentIntent: string | null;
     ephemeralKey?: string;
     paymentIntentId: string;
+    customerId?: string;
 }
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
@@ -32,13 +32,61 @@ export const createStripeCustomer = async (name: string, email: string) => {
     }
 }
 
+/**
+ * FIXED: Validate and create customer if needed
+ */
+export const validateOrCreateCustomer = async (
+    customerId: string | null | undefined,
+    name: string,
+    email: string
+): Promise<string> => {
+    try {
+        // If no customer ID provided, create new one
+        if (!customerId) {
+            console.log('🆕 No customer ID provided, creating new customer');
+            return await createStripeCustomer(name, email);
+        }
+
+        // Try to retrieve existing customer
+        try {
+            const customer = await stripe.customers.retrieve(customerId);
+            
+            // Check if customer was deleted
+            if (customer.deleted) {
+                console.log('⚠️ Customer was deleted, creating new customer');
+                return await createStripeCustomer(name, email);
+            }
+            
+            console.log('✅ Existing customer validated:', customerId);
+            return customerId;
+            
+        } catch (retrieveError: any) {
+            // Customer doesn't exist, create new one
+            if (retrieveError.code === 'resource_missing' || retrieveError.statusCode === 404) {
+                console.log('⚠️ Customer not found, creating new customer');
+                return await createStripeCustomer(name, email);
+            }
+            
+            // Other errors, re-throw
+            throw retrieveError;
+        }
+    } catch (error) {
+        console.error('❌ Error in validateOrCreateCustomer:', error);
+        throw error;
+    }
+}
+
 export const initPayment = async (
     amount: number, 
     customerId: string, 
     currency: Stripe.PaymentIntent["currency"] = "usd"
 ): Promise<StripeIntentData> => {
     try {
-        console.log('🔄 Initializing payment:', { amount, customerId, currency });
+        console.log('🔄 Initializing payment:', { 
+            amount, 
+            customerId: customerId?.substring(0, 10) + '...', 
+            currency 
+        });
         
         // Validate inputs
         if (!customerId) {
@@ -48,19 +96,38 @@ export const initPayment = async (
             throw new Error('Amount must be greater than 0');
         }
 
-        // Check if customer exists
+        // CRITICAL FIX: Validate customer exists before creating payment intent
+        // This prevents the "Customer not found" error
+        let validCustomerId = customerId;
         try {
-            await stripe.customers.retrieve(customerId);
-            console.log('✅ Customer exists:', customerId);
-        } catch (customerError) {
-            console.error('❌ Customer not found:', customerId);
-            throw new Error(`Customer ${customerId} not found`);
+            const customer = await stripe.customers.retrieve(customerId);
+            
+            // Check if customer was deleted
+            if (customer.deleted) {
+                console.error('❌ Customer was deleted:', customerId);
+                throw new Error(`Customer ${customerId} was deleted. Please provide a valid customer ID.`);
+            }
+            
+            console.log('✅ Customer validated:', customerId);
+        } catch (customerError: any) {
+            console.error('❌ Customer validation failed:', {
+                customerId,
+                error: customerError.message,
+                code: customerError.code
+            });
+            
+            // Provide helpful error message
+            if (customerError.code === 'resource_missing' || customerError.statusCode === 404) {
+                throw new Error(`Customer ${customerId} not found in Stripe. The customer ID may be invalid or from a different Stripe account.`);
+            }
+            
+            throw new Error(`Customer validation failed: ${customerError.message}`);
         }
 
         // Create ephemeral key with correct API version
         const ephemeralKey = await stripe.ephemeralKeys.create(
-            { customer: customerId },
-            { apiVersion: '2024-06-20' } // Use a stable API version
+            { customer: validCustomerId },
+            { apiVersion: '2024-06-20' }
         );
         console.log('✅ Ephemeral key created');
 
@@ -68,7 +135,7 @@ export const initPayment = async (
         const paymentIntent = await stripe.paymentIntents.create({
             amount: Math.round(amount * 100),
             currency: currency,
-            customer: customerId,
+            customer: validCustomerId,
             automatic_payment_methods: {
                 enabled: true,
             },
@@ -79,7 +146,8 @@ export const initPayment = async (
         return {
             paymentIntent: paymentIntent.client_secret,
             ephemeralKey: ephemeralKey.secret,
-            paymentIntentId: paymentIntent.id
+            paymentIntentId: paymentIntent.id,
+            customerId: validCustomerId
         };
     } catch (error) {
         console.error('❌ Error in initPayment:', error);
@@ -181,7 +249,7 @@ export const updateStripePayment = async (
     }
 }
 
-// New helper function to check if payment intent exists
+// Helper function to check if payment intent exists
 export const checkPaymentIntentExists = async (paymentIntentId: string): Promise<boolean> => {
     try {
         await stripe.paymentIntents.retrieve(paymentIntentId);
@@ -194,7 +262,7 @@ export const checkPaymentIntentExists = async (paymentIntentId: string): Promise
     }
 }
 
-// Add this to your stripePayments.ts file
+// Payment verification for booking confirmation
 export const verifyPayment = async (paymentIntentId: string) => {
   try {
     console.log("🔍 Verifying payment intent:", paymentIntentId.substring(0, 15) + "...");
@@ -206,7 +274,9 @@ export const verifyPayment = async (paymentIntentId: string) => {
       status: paymentIntent.status,
       amount: paymentIntent.amount,
       currency: paymentIntent.currency,
-      customer: paymentIntent.customer ? paymentIntent.customer.substring(0, 10) + "..." : "none",
+      customer: typeof paymentIntent.customer === 'string' 
+        ? paymentIntent.customer.substring(0, 10) + "..." 
+        : "none",
     });
     
     return paymentIntent;
@@ -224,3 +294,6 @@ export const verifyPayment = async (paymentIntentId: string) => {
     throw error;
   }
 };
+
+// Export stripe instance for direct use in controllers
+export { stripe };

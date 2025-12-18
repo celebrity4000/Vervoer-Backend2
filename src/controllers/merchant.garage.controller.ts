@@ -9,7 +9,8 @@ import mongoose from "mongoose";
 import { generateParkingSpaceID } from "../utils/lotProcessData.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { IUser, User } from "../models/normalUser.model.js";
-import { createStripeCustomer, initPayment, verifyStripePayment } from "../utils/stripePayments.js";
+import { createStripeCustomer, initPayment, validateOrCreateCustomer,  
+  stripe                       } from "../utils/stripePayments.js";
 import { IMerchant, Merchant } from "../models/merchant.model.js";
 import QRCode from 'qrcode';
 
@@ -341,6 +342,7 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
 
 /**
  * Checkout and process payment for a parking booking
+ * FIXED VERSION - Handles invalid Stripe customer IDs gracefully
  */
 export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -455,20 +457,41 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       paymentGateway = 'STRIPE';
       console.log("💳 Initializing Stripe for card payment");
       
-      let stripeCustomerId = verifiedAuth.user.stripeCustomerId;
-      if (!stripeCustomerId) {
-        console.log("👤 Creating new Stripe customer");
-        stripeCustomerId = await createStripeCustomer(
-          verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName, 
+      try {
+        // FIX: Use the new validateOrCreateCustomer function
+        // This handles all edge cases: missing customer, deleted customer, invalid customer
+        const validCustomerId = await validateOrCreateCustomer(
+          verifiedAuth.user.stripeCustomerId,
+          verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName,
           verifiedAuth.user.email
         );
-        await User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId });
-        console.log("✅ Stripe customer created:", stripeCustomerId);
-      }
+        
+        // Update user with valid customer ID if it changed
+        if (validCustomerId !== verifiedAuth.user.stripeCustomerId) {
+          await User.findByIdAndUpdate(verifiedAuth.user._id, { 
+            stripeCustomerId: validCustomerId 
+          });
+          console.log("✅ User updated with new Stripe customer ID:", validCustomerId);
+        }
 
-      stripeDetails = await initPayment(totalAmount + platformCharge - discount, stripeCustomerId);
-      stripeDetails.customerId = stripeCustomerId;
-      console.log("✅ Stripe payment initialized");
+        // Initialize payment with validated customer ID
+        console.log("💳 Initializing Stripe payment intent");
+        stripeDetails = await initPayment(
+          totalAmount + platformCharge - discount, 
+          validCustomerId
+        );
+        
+        console.log("✅ Stripe payment initialized:", {
+          paymentIntentId: stripeDetails.paymentIntentId,
+          customerId: stripeDetails.customerId
+        });
+        
+      } catch (stripeError: any) {
+        console.error("❌ Stripe initialization failed:", stripeError);
+        throw new ApiError(500, "STRIPE_INITIALIZATION_FAILED", {
+          message: stripeError.message || "Failed to initialize Stripe payment"
+        });
+      }
       
     } else if (rData.paymentMethod === 'UPI') {
       paymentGateway = 'UPI';
@@ -563,7 +586,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       }
     };
 
-    console.log("📤 Sending response");
+    console.log("📤 Sending response with valid Stripe details");
     res.status(200).json(new ApiResponse(200, response));
     
   } catch (err) {
@@ -575,6 +598,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     throw err;
   }
 });
+
 // Helper function to validate coupon
 async function validateCoupon(code: string, user: mongoose.Document<any, any, IUser>): Promise<boolean> {
   return code.startsWith('DISC');
