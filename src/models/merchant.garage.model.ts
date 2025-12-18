@@ -188,7 +188,7 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
     bookedSlot: { type: String, required: true },
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
-    platformCharge: { type: Number, required: true, default:0 },
+    platformCharge: { type: Number, required: true, default: 0 },
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },
@@ -197,13 +197,20 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
       amount: Number,
       method: { type: String, enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"] },
       status: { type: String, enum: ["PENDING", "SUCCESS", "FAILED"], default: "PENDING" },
-      paymentGateway: { type: String, enum: ["CASH", "STRIPE"], default: "STRIPE" },
+      // CRITICAL FIX: Add "CASH" and "UPI" to enum, change default based on payment method
+      paymentGateway: { type: String, enum: ["CASH", "STRIPE", "UPI"], default: "CASH" },
       paidAt: Date,
+      // CRITICAL FIX: Remove 'required: true' from nested Stripe fields
+      // These fields should only be required when paymentGateway is "STRIPE"
       StripePaymentDetails: {
-        paymentIntent: { type: String, required: true },
-        ephemeralKey: String,
-        paymentIntentId: { type: String, required: true },
-        customerId: { type: String, required: true }
+        type: {
+          paymentIntent: { type: String },  // Removed required: true
+          ephemeralKey: String,
+          paymentIntentId: { type: String },  // Removed required: true
+          customerId: { type: String }  // Removed required: true
+        },
+        required: false,  // Make the entire object optional
+        default: undefined  // Don't create empty object
       }
     }
   },

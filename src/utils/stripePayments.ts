@@ -194,3 +194,33 @@ export const checkPaymentIntentExists = async (paymentIntentId: string): Promise
     }
 }
 
+// Add this to your stripePayments.ts file
+export const verifyPayment = async (paymentIntentId: string) => {
+  try {
+    console.log("🔍 Verifying payment intent:", paymentIntentId.substring(0, 15) + "...");
+    
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+    
+    console.log("✅ Payment intent retrieved:", {
+      id: paymentIntent.id,
+      status: paymentIntent.status,
+      amount: paymentIntent.amount,
+      currency: paymentIntent.currency,
+      customer: paymentIntent.customer ? paymentIntent.customer.substring(0, 10) + "..." : "none",
+    });
+    
+    return paymentIntent;
+  } catch (error: any) {
+    console.error("❌ Stripe verification error:", {
+      message: error.message,
+      type: error.type,
+      code: error.code
+    });
+    
+    // Re-throw with a more descriptive message
+    if (error.type === 'StripeInvalidRequestError') {
+      throw new Error(`Invalid payment intent: ${paymentIntentId}`);
+    }
+    throw error;
+  }
+};

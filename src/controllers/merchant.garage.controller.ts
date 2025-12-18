@@ -13,6 +13,8 @@ import { createStripeCustomer, initPayment, verifyStripePayment } from "../utils
 import { IMerchant, Merchant } from "../models/merchant.model.js";
 import QRCode from 'qrcode';
 
+import { verifyPayment } from "../utils/stripePayments.js";
+
 // Zod schemas for validation
 const GarageData = z.object({
   garageName: z.string().min(1, "Garage name is required"),
@@ -342,31 +344,39 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
  */
 export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Response) => {
   try {
-    console.log("new checkout request\nValidating Auth")
+    console.log("🚀 New checkout request");
+    console.log("🔐 Validating Auth");
+    
     const verifiedAuth = await verifyAuthentication(req);
     
     if (verifiedAuth?.userType !== "user" || !verifiedAuth?.user) {
       throw new ApiError(401, 'UNAUTHORIZED');
     }
 
-    console.log("Validation Successful request user is", verifiedAuth.user._id)
-    console.log("Validating req data")
+    console.log("✅ Auth validated. User:", verifiedAuth.user._id);
+    console.log("📋 Validating request data");
     
-    // Parse and validate request data
     const rData = CheckoutData.parse(req.body);
-    console.log("Validation Successful req data is", rData)
+    console.log("✅ Request data validated:", {
+      garageId: rData.garageId,
+      slot: rData.bookedSlot,
+      paymentMethod: rData.paymentMethod,
+      vehicleNumber: rData.vehicleNumber
+    });
     
-    console.log("Verifying garage")
+    console.log("🏢 Verifying garage");
     const garage = await Garage.findById(rData.garageId).populate<{owner : IMerchant }>("owner", "-password");
+    
     if (!garage) {
       throw new ApiError(404, "GARAGE_NOT_FOUND");
     }
-    console.log("Verified garage is", garage)
     
-    // Check if the slot exists in availableSlots
+    console.log("✅ Garage verified:", garage.garageName);
+    
+    // Verify slot
     const selectedZone = garage?.spacesList?.get(rData.bookedSlot.zone);
-    console.log("Verifying slot id", rData.bookedSlot.slot)
-    console.log("Maximum Slot: ", selectedZone)
+    console.log("🎯 Verifying slot:", rData.bookedSlot.slot, "in zone:", rData.bookedSlot.zone);
+    console.log("📊 Zone capacity:", selectedZone);
     
     if (!selectedZone || rData.bookedSlot.slot > selectedZone.count) {
       throw new ApiError(400, "INVALID_SLOT");
@@ -374,7 +384,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     
     // Check availability
     const bookedSlotId = generateParkingSpaceID(rData.bookedSlot.zone, rData.bookedSlot.slot.toString());
-    console.log("checking availability of slot")
+    console.log("🔍 Checking availability for slot:", bookedSlotId);
     
     const isNotAvailableSlot = await GarageBooking.findOne({
       garageId: rData.garageId,
@@ -394,10 +404,12 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       ]
     }); 
     
-    if(isNotAvailableSlot){
-      console.log("slot is not available found a booking ", isNotAvailableSlot._id)
+    if (isNotAvailableSlot) {
+      console.log("❌ Slot not available. Found existing booking:", isNotAvailableSlot._id);
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
-    } 
+    }
+    
+    console.log("✅ Slot is available");
     
     // Calculate pricing
     const startDate = new Date(rData.bookingPeriod.from);
@@ -409,6 +421,13 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     let couponDetails = null;
 
     const platformCharge = totalAmount * 0.1;
+    
+    console.log("💰 Pricing calculated:", {
+      totalHours,
+      baseAmount: totalAmount,
+      platformCharge,
+      totalToPay: totalAmount + platformCharge
+    });
     
     // Apply coupon if provided
     if (rData.couponCode) {
@@ -422,47 +441,105 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
           discount: discount,
           discountPercentage: 10
         };
+        console.log("🎟️ Coupon applied:", discount);
       }
     }
     
-    // Handle Stripe customer
-    let stripeCustomerId = verifiedAuth.user.stripeCustomerId;
-    if(!stripeCustomerId){
-      stripeCustomerId = await createStripeCustomer(verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName, verifiedAuth.user.email);
-      await User.findByIdAndUpdate(verifiedAuth.user._id, {stripeCustomerId});
+    // Determine payment method and initialize if needed
+    let paymentGateway: "CASH" | "STRIPE" | "UPI";
+    let stripeDetails = null;
+    
+    console.log("💳 Processing payment method:", rData.paymentMethod);
+    
+    if (rData.paymentMethod === 'CREDIT') {
+      paymentGateway = 'STRIPE';
+      console.log("💳 Initializing Stripe for card payment");
+      
+      let stripeCustomerId = verifiedAuth.user.stripeCustomerId;
+      if (!stripeCustomerId) {
+        console.log("👤 Creating new Stripe customer");
+        stripeCustomerId = await createStripeCustomer(
+          verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName, 
+          verifiedAuth.user.email
+        );
+        await User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId });
+        console.log("✅ Stripe customer created:", stripeCustomerId);
+      }
+
+      stripeDetails = await initPayment(totalAmount + platformCharge - discount, stripeCustomerId);
+      stripeDetails.customerId = stripeCustomerId;
+      console.log("✅ Stripe payment initialized");
+      
+    } else if (rData.paymentMethod === 'UPI') {
+      paymentGateway = 'UPI';
+      console.log("📱 UPI payment method selected");
+      
+    } else {
+      paymentGateway = 'CASH';
+      console.log("💵 CASH payment method selected");
+    }
+    
+    // Prepare booking data
+    console.log("📝 Creating booking document...");
+    
+    const paymentDetailsData: any = {
+      amount: totalAmount + platformCharge - discount,
+      method: rData.paymentMethod,
+      status: 'PENDING',
+      transactionId: null,
+      paidAt: null,
+      paymentGateway: paymentGateway
+    };
+
+    // Only add Stripe details if using Stripe
+    if (paymentGateway === 'STRIPE' && stripeDetails) {
+      paymentDetailsData.StripePaymentDetails = {
+        paymentIntent: stripeDetails.paymentIntent,
+        ephemeralKey: stripeDetails.ephemeralKey,
+        paymentIntentId: stripeDetails.paymentIntentId,
+        customerId: stripeDetails.customerId
+      };
     }
 
-    const stripeDetails = await initPayment(totalAmount + platformCharge - discount, stripeCustomerId);
-    
-    // Create booking with vehicle number
-    const booking = await GarageBooking.create({
+    const bookingData = {
       garageId: rData.garageId,
       bookedSlot: bookedSlotId,
       customerId: verifiedAuth.user._id,
-      bookingPeriod: rData.bookingPeriod,
-      vehicleNumber: rData.vehicleNumber, // This should now be properly included
-      totalAmount: totalAmount + discount,
+      bookingPeriod: {
+        from: rData.bookingPeriod.from,
+        to: rData.bookingPeriod.to
+      },
+      vehicleNumber: rData.vehicleNumber,
+      totalAmount: totalAmount,
       discount: discount,
       amountToPaid: totalAmount + platformCharge - discount,
       platformCharge: platformCharge,
       priceRate: selectedZone.price,
-      paymentDetails: {
-        amount: totalAmount + platformCharge - discount,
-        method: rData.paymentMethod,
-        status: 'PENDING',
-        transactionId: null,
-        paidAt: null,
-        StripePaymentDetails: {...stripeDetails, customerId: stripeCustomerId}
-      },
-      coupon: couponApplied ? rData.couponCode : undefined,
+      paymentDetails: paymentDetailsData,
+      ...(couponApplied && { couponCode: rData.couponCode })
+    };
+
+    console.log("📄 Booking data prepared:", {
+      slot: bookingData.bookedSlot,
+      paymentGateway: bookingData.paymentDetails.paymentGateway,
+      hasStripeDetails: !!bookingData.paymentDetails.StripePaymentDetails
     });
 
-    console.log("Created booking:", booking);
+    // Create booking
+    const booking = await GarageBooking.create(bookingData);
+
+    console.log("✅ Booking created successfully:", {
+      id: booking._id,
+      slot: booking.bookedSlot,
+      paymentGateway: booking.paymentDetails?.paymentGateway,
+      status: booking.paymentDetails?.status
+    });
     
+    // Prepare response
     const response = {
       bookingId: booking._id,
       type: "G",
-      name: garage.garageName,
+      garageName: garage.garageName,
       slot: booking.bookedSlot,
       bookingPeriod: booking.bookingPeriod,
       vehicleNumber: booking.vehicleNumber,
@@ -475,7 +552,8 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         couponDetails: couponApplied ? couponDetails : null,
         totalAmount: totalAmount + platformCharge - discount
       },
-      stripeDetails: booking.paymentDetails.StripePaymentDetails,
+      // Only include stripeDetails if they exist
+      ...(stripeDetails && { stripeDetails }),
       placeInfo: {
         name: garage.garageName,
         phoneNo: garage.contactNumber,
@@ -485,11 +563,13 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       }
     };
 
+    console.log("📤 Sending response");
     res.status(200).json(new ApiResponse(200, response));
+    
   } catch (err) {
-    console.log("Checkout error:", err);
+    console.error("❌ Checkout error:", err);
     if (err instanceof z.ZodError) {
-      console.log("Validation errors:", err.issues);
+      console.log("❌ Validation errors:", err.issues);
       throw new ApiError(400, 'VALIDATION_ERROR', err.issues);
     }
     throw err;
@@ -500,97 +580,150 @@ async function validateCoupon(code: string, user: mongoose.Document<any, any, IU
   return code.startsWith('DISC');
 }
 
+/**
+ * Confirm and finalize a garage booking
+ * This endpoint is called after checkout to complete the booking
+ */
 export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) => {
-  let session: mongoose.ClientSession | undefined;
-  
   try {
-    const verifiedUser = await verifyAuthentication(req);
-    
-    if (!(verifiedUser?.userType === "user")) {
-      throw new ApiError(401, "User must be a verified user");
+    const verifiedAuth = await verifyAuthentication(req);
+
+    if (verifiedAuth?.userType !== "user" || !verifiedAuth?.user) {
+      throw new ApiError(401, "UNAUTHORIZED");
     }
 
-    const rData = BookingData.parse(req.body);
-    const booking = await GarageBooking.findById(rData.bookingId);
+    const {
+      bookingId,
+      carLicensePlateImage,
+      paymentMethod,
+      paymentIntentId,
+    } = req.body;
+
+    console.log("📖 Booking request:", {
+      bookingId,
+      paymentMethod,
+      hasPaymentIntentId: !!paymentIntentId,
+      user: verifiedAuth.user._id,
+    });
+
+    const booking = await GarageBooking.findById(bookingId);
+
     if (!booking) {
-      throw new ApiError(404, "Booking not found");
-    }
-    
-    if (booking.customerId.toString() !== verifiedUser.user._id.toString()) {
-      console.log("customerId:", booking.customerId);
-      console.log("userId:", verifiedUser.user._id);
-      throw new ApiError(401, "User is not authorized to book this slot");
-    }
-    
-    // Start transaction
-    if (booking.paymentDetails?.status === "SUCCESS" && booking.paymentDetails.transactionId) {
-      throw new ApiError(400, "USER ALREADY PAID AND BOOKED");
-    }
-    
-    session = await mongoose.startSession();
-    session.startTransaction();
-
-    // Check for overlapping bookings
-    const bookingFrom = new Date(booking.bookingPeriod.from);
-    const bookingTo = new Date(booking.bookingPeriod.to);
-    
-    const existingBookings = await GarageBooking.countDocuments({
-      garageId: booking.garageId,
-      bookedSlot: booking.bookedSlot, 
-      "paymentDetails.status": "SUCCESS",
-      $or: [
-        {
-          'bookingPeriod.from': { $lt: bookingTo },
-          'bookingPeriod.to': { $gt: bookingFrom }
-        },
-        {
-          'bookingPeriod.from': { $gte: bookingFrom, $lte: bookingTo }
-        },
-        {
-          'bookingPeriod.to': { $gte: bookingFrom, $lte: bookingTo }
-        }
-      ]
-    }).session(session);
-
-    console.log("Booking details:", booking);
-
-    if (!booking.paymentDetails.StripePaymentDetails?.paymentIntentId) {
-      throw new ApiError(400, "NO STRIPE RECORD FOUND");
+      throw new ApiError(404, "BOOKING_NOT_FOUND");
     }
 
-    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId);
-    if (!stripRes.success) throw new ApiError(400, "UNSUCCESSFUL_TRANSACTION");
+    if (booking.customerId.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, "UNAUTHORIZED_BOOKING_ACCESS");
+    }
 
-    booking.paymentDetails.paidAt = new Date();
-    
-    if (existingBookings) {
-      booking.paymentDetails.status = "FAILED";
+    if (booking.paymentDetails.status === "SUCCESS") {
+      throw new ApiError(400, "ALREADY_BOOKED");
+    }
+
+    /**
+     * =========================
+     * CASH PAYMENT
+     * =========================
+     */
+    if (paymentMethod === "CASH") {
+      console.log("💰 Processing CASH payment:", bookingId);
+
+      booking.paymentDetails.status = "SUCCESS";
+      booking.paymentDetails.paidAt = new Date();
+      booking.vehicleImage = carLicensePlateImage;
+
       await booking.save();
-      // TODO: Refund Logic
-      throw new ApiError(400, "SLOT_NOT_AVAILABLE");
+
+      console.log("✅ CASH booking confirmed:", bookingId);
+
+      res.status(200).json(
+        new ApiResponse(200, {
+          message: "Booking confirmed with cash payment",
+          bookingId: booking._id,
+          paymentStatus: "SUCCESS",
+          paymentMethod: "CASH",
+          slot: booking.bookedSlot,
+          vehicleNumber: booking.vehicleNumber,
+        })
+      );
+      return;
     }
-    
-    booking.paymentDetails.status = "SUCCESS";
-    await booking.save();
-    await session.commitTransaction();
-    
-    res.status(201).json(new ApiResponse(201, { booking: booking }));
+
+    /**
+     * =========================
+     * CARD / CREDIT PAYMENT
+     * =========================
+     */
+    if (paymentMethod === "CREDIT" || paymentMethod === "CARD") {
+      console.log("💳 Processing CARD payment:", bookingId);
+
+      if (!paymentIntentId) {
+        throw new ApiError(400, "PAYMENT_INTENT_REQUIRED");
+      }
+
+      try {
+        console.log("🔄 Verifying Stripe payment...");
+
+        const paymentIntent = await verifyPayment(paymentIntentId);
+
+        console.log("✅ Payment intent verified:", {
+          id: paymentIntent.id,
+          status: paymentIntent.status,
+        });
+
+        if (paymentIntent.status !== "succeeded") {
+          throw new ApiError(400, "UNSUCCESSFUL_TRANSACTION", {
+            currentStatus: paymentIntent.status,
+            requiredStatus: "succeeded",
+          });
+        }
+
+        booking.paymentDetails.status = "SUCCESS";
+        booking.paymentDetails.transactionId = paymentIntentId;
+        booking.paymentDetails.paidAt = new Date();
+        booking.vehicleImage = carLicensePlateImage;
+
+        await booking.save();
+
+        console.log("✅ CARD booking confirmed:", bookingId);
+
+        res.status(200).json(
+          new ApiResponse(200, {
+            message: "Booking confirmed and payment successful",
+            bookingId: booking._id,
+            paymentStatus: "SUCCESS",
+            paymentMethod: "CARD",
+            transactionId: paymentIntentId,
+            slot: booking.bookedSlot,
+            vehicleNumber: booking.vehicleNumber,
+          })
+        );
+        return;
+      } catch (error) {
+        console.error("❌ Payment verification failed:", error);
+        throw new ApiError(400, "PAYMENT_VERIFICATION_FAILED", {
+          message:
+            error instanceof Error
+              ? error.message
+              : "Payment verification failed",
+        });
+      }
+    }
+
+    /**
+     * =========================
+     * INVALID PAYMENT METHOD
+     * =========================
+     */
+    throw new ApiError(400, "INVALID_PAYMENT_METHOD");
   } catch (err) {
-    if (session) {
-      await session.abortTransaction();
-    }
-    if (err instanceof z.ZodError) {
-      console.log(err.issues);
-      throw new ApiError(400, "DATA_VALIDATION_ERROR", err.issues);
-    }
-    console.log(err);
+    console.error("❌ Booking confirmation error:", err);
     throw err;
-  } finally {
-    if (session) {
-      await session.endSession();
-    }
   }
 });
+
+
+
 
 /**
  * Get garage details
