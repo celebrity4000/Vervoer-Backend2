@@ -279,37 +279,97 @@ const addressSchema = new mongoose.Schema({
   country:  { type: String, required: true },
 }, { _id: false });
 
+const SERVICE_CATEGORIES = [
+  "Shirts",
+  "Pants", 
+  "Suits",
+  "Dresses",
+  "Coats",
+  "Blankets",
+  "Comforters",
+  "Curtains",
+  "Other"
+];
+
+
+
 const dryCleanerSchema = new mongoose.Schema({
   owner: {
     type: mongoose.Types.ObjectId,
     ref: "Merchant",
     required: true,
   },
-  shopname: { type: String, required: true },
-
-  address: { type: addressSchema, required: true },  
-
-  rating: { type: Number, default: 0 },
-  about: { type: String },
-  contactPerson: { type: String, required: true },
-  phoneNumber: { type: String, required: true },
-  contactPersonImg: { type: String },
+  shopname: { 
+    type: String, 
+    required: true 
+  },
+  address: { 
+    type: addressSchema, 
+    required: true 
+  },  
+  rating: { 
+    type: Number, 
+    default: 0 
+  },
+  about: { 
+    type: String 
+  },
+  contactPerson: { 
+    type: String, 
+    required: true 
+  },
+  phoneNumber: { 
+    type: String, 
+    required: true 
+  },
+  contactPersonImg: { 
+    type: String 
+  },
   shopimage: [String],
   hoursOfOperation: [
     {
-      day: { type: String },
-      open: { type: String },
-      close: { type: String },
+      day: { 
+        type: String,
+        enum: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+      },
+      open: { 
+        type: String 
+      },
+      close: { 
+        type: String 
+      },
     },
   ],
   services: [
     {
-      name: { type: String, required: true },
-      category: { type: String, required: true },
-      strachLevel: { type: Number, enum: [1, 2, 3, 4, 5], default: 3 },
-      washOnly: { type: Boolean, default: false },
-      additionalservice: { type: String, enum: ["zipper", "button", "wash/fold"] },
-      price: { type: Number },
+      name: { 
+        type: String, 
+        required: true 
+      },
+      category: { 
+        type: String, 
+        required: true,
+        enum: SERVICE_CATEGORIES, // NOW VALIDATED!
+        default: "Other"
+      },
+      starchLevel: { // Fixed typo: was "strachLevel"
+        type: Number, 
+        enum: [1, 2, 3, 4, 5], 
+        default: 3 
+      },
+      washOnly: { 
+        type: Boolean, 
+        default: false 
+      },
+      additionalservice: { 
+        type: String, 
+        enum: ["zipper", "button", "wash/fold"] 
+      },
+      price: { 
+        type: Number,
+        required: true,
+        min: 0
+      },
     },
   ],
   
@@ -319,9 +379,9 @@ const dryCleanerSchema = new mongoose.Schema({
   toObject: { virtuals: true },
 });
 
+dryCleanerSchema.index({ 'services.category': 1 });
 
-
-export const DryCleaner = mongoose.model("DryCleaner", dryCleanerSchema );
+export const DryCleaner = mongoose.model("DryCleaner", dryCleanerSchema);
 
 
 
