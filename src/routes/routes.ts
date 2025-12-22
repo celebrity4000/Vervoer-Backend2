@@ -6,7 +6,7 @@ import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editD
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {completeDriverProfile, getDriverProfile, registerDriverBasic,updateDriverPersonalInfo,updateVehicleInfo, createDriverBankDetails, getDriverAttestationStatus, submitDriverAttestation, uploadDriverProfilePhoto} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin, setGlobalPricing,getGlobalPricing} from "../controllers/admin.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin, setGlobalPricing,getGlobalPricing, deleteDryCleaner} from "../controllers/admin.controller.js";
 import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.parkinglot.controller.js";
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
@@ -249,6 +249,8 @@ router.get("/admin/get-all-garages", isAdmin, getAllGarages);
 router.delete("/admin/delete-garage/:id", isAdmin, deleteGarageById);
 router.get("/admin/get-garage/:id", isAdmin, getGarageById);
 router.get("/admin/get-all-dry-cleaners", isAdmin, getAllDryCleaner);
+router.delete("/admin/delete-dry-cleaner/:id", deleteDryCleaner);
+
 router.get("/admin/get-garage-booking-summary/:garageId", isAdmin, getGarageBookingSummary);
 router.get("/admin/get-parking-lot/:id", isAdmin, getParkingLotbyId);
 router.get("/admin/get-list-of-parking-lots", isAdmin, getListOfParkingLot);

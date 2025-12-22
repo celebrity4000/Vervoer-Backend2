@@ -314,6 +314,40 @@ export const getAllDryCleaner = asyncHandler(async (req, res) => {
   );
 });
 
+
+// admin delete dry cleaner
+export const deleteDryCleaner = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+
+  // Validate token
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+
+  const token = authHeader.split(" ")[1];
+  const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+
+  // Check role
+  if (!decoded || decoded.role !== "admin") {
+    throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+  }
+
+  // Validate dry cleaner existence
+  const dryCleaner = await DryCleaner.findById(id);
+  if (!dryCleaner) {
+    throw new ApiError(404, "Dry cleaner not found");
+  }
+
+  // Delete dry cleaner
+  await DryCleaner.findByIdAndDelete(id);
+
+  return res.status(200).json(
+    new ApiResponse(200, null, "Dry cleaner deleted successfully")
+  );
+});
+
+
 export const getGarageBookingSummary = asyncHandler(async (req, res) => {
   const { garageId } = req.params;
 
