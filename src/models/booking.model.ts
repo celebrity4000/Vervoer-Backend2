@@ -24,6 +24,7 @@ export interface IPricing {
   deliveryCharge: number;
   platformFee: number;
   totalAmount: number;
+  tip?: number;
 }
 
 export interface IBooking extends Document {
@@ -115,6 +116,7 @@ const PricingSchema = new Schema({
   serviceFees: { type: Number, required: true, min: 0 },
   deliveryCharge: { type: Number, required: true, min: 0 },
   platformFee: { type: Number, required: true, min: 0 },
+  tip: { type: Number, min: 0 },
   totalAmount: { type: Number, required: true, min: 0 }
 }, { _id: false });
 
@@ -161,7 +163,7 @@ const BookingSchema = new Schema<IBooking>({
       validator: function(pricing: IPricing) {
         // Validate that totalAmount matches the sum of all components
         const calculatedTotal = pricing.subtotal + pricing.serviceFees + 
-                              pricing.deliveryCharge + pricing.platformFee;
+                              pricing.deliveryCharge + pricing.platformFee+ (pricing.tip || 0);
         return Math.abs(calculatedTotal - pricing.totalAmount) < 0.01; // Allow for small floating point errors
       },
       message: 'Total amount must equal sum of all pricing components'

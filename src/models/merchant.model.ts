@@ -349,10 +349,10 @@ const dryCleanerSchema = new mongoose.Schema({
       category: { 
         type: String, 
         required: true,
-        enum: SERVICE_CATEGORIES, // NOW VALIDATED!
+        enum: SERVICE_CATEGORIES,
         default: "Other"
       },
-      starchLevel: { // Fixed typo: was "strachLevel"
+      starchLevel: { 
         type: Number, 
         enum: [1, 2, 3, 4, 5], 
         default: 3 
