@@ -367,7 +367,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     });
     
     console.log("🏢 Verifying garage");
-    const garage = await Garage.findById(rData.garageId).populate<{owner : IMerchant }>("owner", "-password");
+    const garage = await Garage.findById(rData.garageId).populate<{owner: IMerchant}>("owner", "-password");
     
     if (!garage) {
       throw new ApiError(404, "GARAGE_NOT_FOUND");
@@ -404,7 +404,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
           'bookingPeriod.to': { $gte: new Date(rData.bookingPeriod.from), $lte: new Date(rData.bookingPeriod.to) }
         }
       ]
-    }); 
+    });
     
     if (isNotAvailableSlot) {
       console.log("❌ Slot not available. Found existing booking:", isNotAvailableSlot._id);
@@ -417,24 +417,14 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate = new Date(rData.bookingPeriod.to);
     const totalHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-    let totalAmount = totalHours * (selectedZone.price || 0);
+    const totalAmount = totalHours * (selectedZone.price || 0);
     let discount = 0;
     let couponApplied = false;
     let couponDetails = null;
 
-    const platformCharge = totalAmount * 0.1;
-    
-    console.log("💰 Pricing calculated:", {
-      totalHours,
-      baseAmount: totalAmount,
-      platformCharge,
-      totalToPay: totalAmount + platformCharge
-    });
-    
-    // Apply coupon if provided
+    // Apply coupon BEFORE calculating fees (discount is on base amount)
     if (rData.couponCode) {
       const isValidCoupon = await validateCoupon(rData.couponCode, verifiedAuth?.user);
-      
       if (isValidCoupon) {
         discount = totalAmount * 0.1;
         couponApplied = true;
@@ -446,6 +436,21 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         console.log("🎟️ Coupon applied:", discount);
       }
     }
+
+    const serviceFee = totalAmount * 0.05;
+    const transactionFee = 0.50;
+    const estimatedTaxes = totalAmount * 0.15;
+    const amountToPaid = totalAmount + serviceFee + transactionFee + estimatedTaxes - discount;
+
+    console.log("💰 Pricing calculated:", {
+      totalHours,
+      baseAmount: totalAmount,
+      serviceFee,
+      transactionFee,
+      estimatedTaxes,
+      discount,
+      totalToPay: amountToPaid
+    });
     
     // Determine payment method and initialize if needed
     let paymentGateway: "CASH" | "STRIPE" | "UPI";
@@ -458,28 +463,19 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       console.log("💳 Initializing Stripe for card payment");
       
       try {
-        // FIX: Use the new validateOrCreateCustomer function
-        // This handles all edge cases: missing customer, deleted customer, invalid customer
         const validCustomerId = await validateOrCreateCustomer(
           verifiedAuth.user.stripeCustomerId,
           verifiedAuth.user.firstName + " " + verifiedAuth.user.lastName,
           verifiedAuth.user.email
         );
         
-        // Update user with valid customer ID if it changed
         if (validCustomerId !== verifiedAuth.user.stripeCustomerId) {
-          await User.findByIdAndUpdate(verifiedAuth.user._id, { 
-            stripeCustomerId: validCustomerId 
-          });
+          await User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId: validCustomerId });
           console.log("✅ User updated with new Stripe customer ID:", validCustomerId);
         }
 
-        // Initialize payment with validated customer ID
         console.log("💳 Initializing Stripe payment intent");
-        stripeDetails = await initPayment(
-          totalAmount + platformCharge - discount, 
-          validCustomerId
-        );
+        stripeDetails = await initPayment(amountToPaid, validCustomerId);
         
         console.log("✅ Stripe payment initialized:", {
           paymentIntentId: stripeDetails.paymentIntentId,
@@ -496,17 +492,15 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     } else if (rData.paymentMethod === 'UPI') {
       paymentGateway = 'UPI';
       console.log("📱 UPI payment method selected");
-      
     } else {
       paymentGateway = 'CASH';
       console.log("💵 CASH payment method selected");
     }
     
-    // Prepare booking data
     console.log("📝 Creating booking document...");
     
     const paymentDetailsData: any = {
-      amount: totalAmount + platformCharge - discount,
+      amount: amountToPaid,
       method: rData.paymentMethod,
       status: 'PENDING',
       transactionId: null,
@@ -514,7 +508,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       paymentGateway: paymentGateway
     };
 
-    // Only add Stripe details if using Stripe
     if (paymentGateway === 'STRIPE' && stripeDetails) {
       paymentDetailsData.StripePaymentDetails = {
         paymentIntent: stripeDetails.paymentIntent,
@@ -535,8 +528,10 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       vehicleNumber: rData.vehicleNumber,
       totalAmount: totalAmount,
       discount: discount,
-      amountToPaid: totalAmount + platformCharge - discount,
-      platformCharge: platformCharge,
+      serviceFee: serviceFee,
+      transactionFee: transactionFee,
+      estimatedTaxes: estimatedTaxes,
+      amountToPaid: amountToPaid,
       priceRate: selectedZone.price,
       paymentDetails: paymentDetailsData,
       ...(couponApplied && { couponCode: rData.couponCode })
@@ -548,7 +543,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       hasStripeDetails: !!bookingData.paymentDetails.StripePaymentDetails
     });
 
-    // Create booking
     const booking = await GarageBooking.create(bookingData);
 
     console.log("✅ Booking created successfully:", {
@@ -558,7 +552,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       status: booking.paymentDetails?.status
     });
     
-    // Prepare response
     const response = {
       bookingId: booking._id,
       type: "G",
@@ -568,14 +561,15 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       vehicleNumber: booking.vehicleNumber,
       pricing: {
         priceRate: selectedZone.price,
-        basePrice: totalHours * (selectedZone.price || 0),
+        basePrice: totalAmount,
         discount: discount,
-        platformCharge,
+        serviceFee: serviceFee,
+        transactionFee: transactionFee,
+        estimatedTaxes: estimatedTaxes,
         couponApplied: couponApplied,
         couponDetails: couponApplied ? couponDetails : null,
-        totalAmount: totalAmount + platformCharge - discount
+        totalAmount: amountToPaid
       },
-      // Only include stripeDetails if they exist
       ...(stripeDetails && { stripeDetails }),
       placeInfo: {
         name: garage.garageName,
@@ -854,7 +848,6 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
       throw new ApiError(401, 'UNAUTHORIZED');
     }
     
-    // Find the booking and populate related data
     const booking = await GarageBooking.findById(bookingId)
       .populate<{garageId: IGarage & {owner: IMerchant}}>({
         path: 'garageId', 
@@ -878,12 +871,10 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
       isGarageOwner = garage?.owner.toString() === verifiedAuth.user._id.toString();
     }
 
-    // If neither the customer nor the garage owner, deny access
     if (!isCustomer && !isGarageOwner) {
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
 
-    // Format the response
     console.log(booking);
     const response = {
       _id: booking._id,
@@ -909,10 +900,12 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
         totalAmount: booking.totalAmount,
         amountPaid: booking.amountToPaid,
         discount: booking.discount,
+        serviceFee: booking.serviceFee,
+        transactionFee: booking.transactionFee,
+        estimatedTaxes: booking.estimatedTaxes,
         status: booking.paymentDetails.status,
         method: booking.paymentDetails.method,
         paidAt: booking.paymentDetails.paidAt,
-        platformCharge: booking.platformCharge,
       }
     };
 
@@ -934,50 +927,36 @@ const BookingQueryParams = z.object({
 
 export const garageBookingList = asyncHandler(async (req, res) => {
   try {
-    // Parse query parameters with defaults
     console.log("NEW Query Requested");
     const { page, limit, garageId } = BookingQueryParams.parse(req.query);
     const skip = (page - 1) * limit;
 
-    // Verify authentication
     const verifiedAuth = await verifyAuthentication(req);
     if (!verifiedAuth?.user) {
       throw new ApiError(401, 'UNAUTHORIZED');
     }
 
-    // Build the base query
     const query: any = {};
     
     if (verifiedAuth.userType === 'user') {
-      // For regular users, only show their own bookings
       query.customerId = verifiedAuth.user._id;
     } else if (verifiedAuth.userType === 'merchant') {
-      // For merchants, show bookings for their garages
       if (garageId) {
-        // Verify the garage belongs to the merchant
         const garage = await Garage.findOne({ 
           _id: garageId, 
           owner: verifiedAuth.user._id 
         });
-        
         if (!garage) {
           throw new ApiError(404, 'GARAGE_NOT_FOUND_OR_ACCESS_DENIED');
         }
         query.garageId = garageId;
       } else {
-        // If no garageId provided, get all garages owned by the merchant
         const merchantGarages = await Garage.find({ owner: verifiedAuth.user._id }, '_id');
         const garageIds = merchantGarages.map(g => g._id);
-        
         if (garageIds.length === 0) {
-          // No garages found for this merchant
           res.status(200).json(new ApiResponse(200, {
             bookings: [],
-            pagination: {
-              total: 0,
-              page,
-              size: limit
-            }
+            pagination: { total: 0, page, size: limit }
           }));
           return;
         }
@@ -990,7 +969,6 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     query["paymentDetails.status"] = { $ne: "PENDING" };
     console.log("query at garage:", query);
     
-    // Get paginated bookings with related data
     const bookings = await GarageBooking.find(query)
       .populate<{garageId: IGarage & {owner: IMerchant}}>({
         path: 'garageId', 
@@ -1002,12 +980,11 @@ export const garageBookingList = asyncHandler(async (req, res) => {
         }
       })
       .populate<{customerId: IUser}>('customerId', 'firstName lastName email phoneNumber _id')
-      .sort({ createdAt: -1 }) // Most recent first
+      .sort({ createdAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean();
 
-    // Format the response
     console.log("found garage booking", bookings.length);
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
@@ -1031,10 +1008,12 @@ export const garageBookingList = asyncHandler(async (req, res) => {
         totalAmount: booking.totalAmount,
         amountPaid: booking.amountToPaid,
         discount: booking.discount,
+        serviceFee: booking.serviceFee,
+        transactionFee: booking.transactionFee,
+        estimatedTaxes: booking.estimatedTaxes,
         status: booking.paymentDetails.status,
         method: booking.paymentDetails.method,
         paidAt: booking.paymentDetails.paidAt,
-        platformCharge: booking.platformCharge,
       },
       status: booking.paymentDetails.status,
       type: "G",
@@ -1042,16 +1021,15 @@ export const garageBookingList = asyncHandler(async (req, res) => {
 
     res.status(200).json(new ApiResponse(200, {
       bookings: formattedBookings,
-      pagination: {
-        page,
-        size: limit
-      }
+      pagination: { page, size: limit }
     }));
   } catch (error) {
     console.error('Error in bookingList:', error);
     throw error;
   }
 });
+
+
 
 export const scanBookingQRCode = asyncHandler(async (req: Request, res: Response) => {
   const bookingId = req.params.id;
@@ -1112,6 +1090,9 @@ export const scanBookingQRCode = asyncHandler(async (req: Request, res: Response
       totalAmount: booking.totalAmount,
       amountPaid: booking.amountToPaid,
       discount: booking.discount,
+      serviceFee: booking.serviceFee,
+      transactionFee: booking.transactionFee,
+      estimatedTaxes: booking.estimatedTaxes,
       status: booking.paymentDetails.status,
       method: booking.paymentDetails.method,
       paidAt: booking.paymentDetails.paidAt,

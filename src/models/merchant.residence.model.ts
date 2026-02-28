@@ -1,9 +1,8 @@
 import mongoose from "mongoose";
 import { StripeIntentData } from "../utils/stripePayments.js";
-import { required } from "zod/v4-mini";
 
 export interface IResident {
-  _id: mongoose.Types.ObjectId
+  _id: mongoose.Types.ObjectId;
   owner: mongoose.Types.ObjectId;
   residenceName: string;
   about: string;
@@ -12,7 +11,6 @@ export interface IResident {
   price: number;
   contactNumber: string;
   email?: string;
-  
   vehicleType: "bike" | "car" | "both";
   generalAvailable: [
     {
@@ -23,15 +21,11 @@ export interface IResident {
       is24Hours: boolean;
     }
   ];
-  // totalSlot? : number,
   images: string[];
   isVerified: boolean;
   isActive: boolean;
   is24x7: boolean;
-  emergencyContact?: {
-    person: string;
-    number: string;
-  };
+  emergencyContact?: { person: string; number: string };
   parking_pass: boolean;
   transportationAvailable: boolean;
   transportationTypes?: string[];
@@ -39,89 +33,41 @@ export interface IResident {
   coveredDrivewayTypes?: string[];
   securityCamera: boolean;
 }
+
 interface ResidentMethods {
   isOpenNow: () => boolean;
 }
-const residenceSchema = new mongoose.Schema<
-  IResident,
-  mongoose.Model<IResident>,
-  ResidentMethods
->(
+
+const residenceSchema = new mongoose.Schema<IResident, mongoose.Model<IResident>, ResidentMethods>(
   {
     images: [String],
-    owner: {
-      type: mongoose.Schema.ObjectId,
-      ref: "Merchant",
-    },
-    contactNumber: {
-      type: String,
-      required: true,
-    },
-    email: {
-      type: String,
-    },
+    owner: { type: mongoose.Schema.ObjectId, ref: "Merchant" },
+    contactNumber: { type: String, required: true },
+    email: { type: String },
     vehicleType: {
       type: String,
       enum: ["bike", "car", "both"],
       required: true,
       default: "both"
     },
-    // totalSlot : {
-    //   type : Number ,
-    // },
-    residenceName: {
-      type: String,
-      required: true,
-    },
-    address: {
-      type: String,
-      required: true,
-    },
+    residenceName: { type: String, required: true },
+    address: { type: String, required: true },
     gpsLocation: {
-      type: {
-        type: String,
-        enum: ["Point"],
-        default: "Point",
-      },
-      coordinates: {
-        type: [Number, Number],
-        required: true,
-      },
+      type: { type: String, enum: ["Point"], default: "Point" },
+      coordinates: { type: [Number, Number], required: true },
     },
-    price: {
-      type: Number,
-      required: true,
-    },
-    about: {
-      type: String,
-      required: true,
-    },
-    generalAvailable: [
-      {
-        day: {
-          type: String,
-          enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
-          required: true,
-        },
-        isOpen: {
-          type: Boolean,
-          default: true,
-        },
-        openTime: String,
-        closeTime: String,
-        is24Hours: {
-          type: Boolean,
-          default: false,
-        },
-      },
-    ],
+    price: { type: Number, required: true },
+    about: { type: String, required: true },
+    generalAvailable: [{
+      day: { type: String, enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"], required: true },
+      isOpen: { type: Boolean, default: true },
+      openTime: String,
+      closeTime: String,
+      is24Hours: { type: Boolean, default: false },
+    }],
     is24x7: Boolean,
     isActive: { type: Boolean, default: true },
-    emergencyContact: {
-      person: String,
-      number: String,
-    },
-
+    emergencyContact: { person: String, number: String },
     parking_pass: { type: Boolean, default: false },
     transportationAvailable: { type: Boolean, default: false },
     transportationTypes: { type: [String], default: undefined },
@@ -136,41 +82,31 @@ const residenceSchema = new mongoose.Schema<
     methods: {
       isOpenNow: function () {
         const now = new Date();
-        const today = now
-          .toLocaleDateString("en-US", { weekday: "short" })
-          .toUpperCase()
-          .slice(0, 3);
-
+        const today = now.toLocaleDateString("en-US", { weekday: "short" }).toUpperCase().slice(0, 3);
         const todayHours = this.generalAvailable.find((ga) => ga.day === today);
-
         if (!todayHours || !todayHours.isOpen) return false;
         if (todayHours.is24Hours) return true;
-
         const currentTime = now.getHours() * 100 + now.getMinutes();
         const openTime = parseInt(todayHours.openTime?.replace(":", "") || "0");
-        const closeTime = parseInt(
-          todayHours.closeTime?.replace(":", "") || "0"
-        );
-
+        const closeTime = parseInt(todayHours.closeTime?.replace(":", "") || "0");
         return currentTime >= openTime && currentTime <= closeTime;
       },
     },
   }
 );
-residenceSchema.index({ gpsLocation: "2dsphere" });
 
+residenceSchema.index({ gpsLocation: "2dsphere" });
 export const ResidenceModel = mongoose.model("Residence", residenceSchema);
 
-
+// ✅ Updated: replaced platformCharge with serviceFee, transactionFee, estimatedTaxes
 export interface IResidenceBooking {
   residenceId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
-  bookingPeriod: {
-    from: Date | string;
-    to: Date | string;
-  };
+  bookingPeriod: { from: Date | string; to: Date | string };
   vehicleNumber?: string;
-  platformCharge : number;
+  serviceFee: number;
+  transactionFee: number;
+  estimatedTaxes: number;
   totalAmount: number;
   amountToPaid: number;
   couponCode?: string;
@@ -195,10 +131,13 @@ const residenceBookingSchema = new mongoose.Schema<IResidenceBooking>(
       from: { type: Date, required: true },
       to: { type: Date, required: true },
     },
-    vehicleNumber: { type: String},
+    vehicleNumber: { type: String },
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
-    platformCharge: {type: Number, required : true , default:0},
+    // ✅ Replaced platformCharge with three new fee fields
+    serviceFee: { type: Number, required: true, default: 0 },
+    transactionFee: { type: Number, required: true, default: 0 },
+    estimatedTaxes: { type: Number, required: true, default: 0 },
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },

@@ -25,18 +25,9 @@ export interface IGarage {
   isVerified: boolean;
   isActive: boolean;
   vehicleType: "bike" | "car" | "both";
-  spacesList: Map<
-    string,
-    {
-      count: number;
-      price: number;
-    }
-  >;
+  spacesList: Map<string, { count: number; price: number }>;
   is24x7: boolean;
-  emergencyContact?: {
-    person: string;
-    number: string;
-  };
+  emergencyContact?: { person: string; number: string };
   parking_pass: boolean;
   transportationAvailable: boolean;
   transportationTypes?: string[];
@@ -52,35 +43,19 @@ interface GarageMethods {
 
 const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, GarageMethods>(
   {
-    owner: {
-      type: mongoose.Schema.ObjectId,
-      ref: "Merchant",
-      required: true
-    },
+    owner: { type: mongoose.Schema.ObjectId, ref: "Merchant", required: true },
     price: { type: Number, required: true },
     garageName: { type: String, required: true, trim: true },
     about: { type: String, required: true },
     address: { type: String, required: true },
     location: {
-      type: {
-        type: String,
-        enum: ['Point'],
-        default: 'Point'
-      },
-      coordinates: {
-        type: [Number],
-        required: true,
-        default: [0, 0]
-      }
+      type: { type: String, enum: ['Point'], default: 'Point' },
+      coordinates: { type: [Number], required: true, default: [0, 0] }
     },
     contactNumber: { type: String, required: true },
     email: { type: String, trim: true, lowercase: true },
     generalAvailable: [{
-      day: {
-        type: String,
-        enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
-        required: true
-      },
+      day: { type: String, enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"], required: true },
       isOpen: { type: Boolean, default: true },
       openTime: String,
       closeTime: String,
@@ -98,18 +73,12 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
     spacesList: {
       type: Map,
       of: new mongoose.Schema(
-        {
-          count: { type: Number, required: true },
-          price: { type: Number, required: true }
-        },
+        { count: { type: Number, required: true }, price: { type: Number, required: true } },
         { _id: false }
       )
     },
     is24x7: { type: Boolean, default: false },
-    emergencyContact: {
-      person: String,
-      number: String
-    },
+    emergencyContact: { person: String, number: String },
     parking_pass: { type: Boolean, default: false },
     transportationAvailable: { type: Boolean, default: false },
     transportationTypes: { type: [String], default: undefined },
@@ -128,7 +97,6 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
         const todayHours = this.generalAvailable.find(wh => wh.day === today);
         if (!todayHours || !todayHours.isOpen) return false;
         if (todayHours.is24Hours) return true;
-
         const currentTime = now.getHours() * 100 + now.getMinutes();
         const openTime = parseInt(todayHours.openTime?.replace(':', '') || '0');
         const closeTime = parseInt(todayHours.closeTime?.replace(':', '') || '0');
@@ -151,18 +119,18 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
 
 garageSchema.index({ location: '2dsphere' });
 
+// ✅ Updated: replaced platformCharge with serviceFee, transactionFee, estimatedTaxes
 interface IGarageBooking {
   garageId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
-  bookingPeriod: {
-    from: Date | string;
-    to: Date | string;
-  };
+  bookingPeriod: { from: Date | string; to: Date | string };
   vehicleNumber: string;
   bookedSlot: string;
   totalAmount: number;
   amountToPaid: number;
-  platformCharge: number;
+  serviceFee: number;
+  transactionFee: number;
+  estimatedTaxes: number;
   couponCode?: string;
   discount: number;
   priceRate: number;
@@ -171,6 +139,7 @@ interface IGarageBooking {
     amount: number;
     method: "CASH" | "CREDIT" | "DEBIT" | "STRIPE" | "PAYPAL";
     status: "PENDING" | "SUCCESS" | "FAILED";
+    paymentGateway: "CASH" | "STRIPE" | "UPI";
     StripePaymentDetails?: StripeIntentData & { customerId: string };
     paidAt: string | Date | null;
   };
@@ -188,7 +157,10 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
     bookedSlot: { type: String, required: true },
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
-    platformCharge: { type: Number, required: true, default: 0 },
+    // ✅ Replaced platformCharge with three new fee fields
+    serviceFee: { type: Number, required: true, default: 0 },
+    transactionFee: { type: Number, required: true, default: 0 },
+    estimatedTaxes: { type: Number, required: true, default: 0 },
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },
@@ -197,20 +169,17 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
       amount: Number,
       method: { type: String, enum: ["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"] },
       status: { type: String, enum: ["PENDING", "SUCCESS", "FAILED"], default: "PENDING" },
-      // CRITICAL FIX: Add "CASH" and "UPI" to enum, change default based on payment method
       paymentGateway: { type: String, enum: ["CASH", "STRIPE", "UPI"], default: "CASH" },
       paidAt: Date,
-      // CRITICAL FIX: Remove 'required: true' from nested Stripe fields
-      // These fields should only be required when paymentGateway is "STRIPE"
       StripePaymentDetails: {
         type: {
-          paymentIntent: { type: String },  // Removed required: true
+          paymentIntent: { type: String },
           ephemeralKey: String,
-          paymentIntentId: { type: String },  // Removed required: true
-          customerId: { type: String }  // Removed required: true
+          paymentIntentId: { type: String },
+          customerId: { type: String }
         },
-        required: false,  // Make the entire object optional
-        default: undefined  // Don't create empty object
+        required: false,
+        default: undefined
       }
     }
   },

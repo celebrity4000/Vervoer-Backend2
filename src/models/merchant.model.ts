@@ -184,7 +184,9 @@ export interface ILotRecord {
   priceRate : number ;
   amountToPaid: number;
   appliedCouponCode: string;
-  platformCharge : number;
+  serviceFee: number;
+transactionFee: number;
+estimatedTaxes: number;
   discount: number;
   paymentDetails: {
     transactionId: string | null;
@@ -220,10 +222,18 @@ const lotRentRecordSchema = new mongoose.Schema<ILotRecord , mongoose.Model<ILot
     type: Number,
     required: true,
   },
-  platformCharge: {
-    type: Number,
-    required: true,
-  },
+  serviceFee: {
+  type: Number,
+  required: true,
+},
+transactionFee: {
+  type: Number,
+  required: true,
+},
+estimatedTaxes: {
+  type: Number,
+  required: true,
+},
   priceRate: {
     type: Number,
     required: true,
