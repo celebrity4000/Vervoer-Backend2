@@ -457,7 +457,7 @@ export const resetForgottenPassword = asyncHandler(async (req: Request, res: Res
 
   const hashedPassword = await bcrypt.hash(password, 10);
   user.password = hashedPassword;
-  user.isVerified = false; 
+  // user.isVerified = false; 
 
   await user.save();
 
