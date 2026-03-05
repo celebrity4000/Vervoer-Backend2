@@ -3,16 +3,24 @@ import jwt from "jsonwebtoken";
 import { ApiError } from "../utils/apierror.js";
 
 export const isAdmin = (req: Request, res: Response, next: NextFunction) => {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) throw new ApiError(401, "Token missing");
-
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
-    if (decoded.role !== "admin") throw new ApiError(403, "Unauthorized admin access");
+    const token = req.headers.authorization?.split(" ")[1];
+    
+    if (!token) {
+      return next(new ApiError(401, "Token missing"));
+    }
 
-    req.user = decoded; 
+    const decoded = jwt.verify(token, process.env.JWT_SECRET as string) as any;
+    
+    if (!decoded || decoded.role !== "admin") {
+      return next(new ApiError(403, "Unauthorized admin access"));
+    }
+
+    req.user = decoded;
     next();
+    
   } catch (error) {
-    throw new ApiError(401, "Invalid token");
+    // jwt.verify throws if token is invalid/expired
+    return next(new ApiError(401, "Invalid or expired token"));
   }
 };
