@@ -281,12 +281,10 @@ export const loginSchema = z.object({
 
 export const loginUser = asyncHandler(
   async (req: Request, res: Response, next: NextFunction) => {
-    // Validate input
     const { email, password, userType } = loginSchema.parse(req.body);
 
     let existingUser: any = null;
 
-    // Fetch user based on userType
     if (userType === "merchant") {
       existingUser = await Merchant.findOne({ email });
     } else if (userType === "driver") {
@@ -295,31 +293,31 @@ export const loginUser = asyncHandler(
       existingUser = await User.findOne({ email });
     }
 
-    // If user not found
     if (!existingUser) {
       throw new ApiError(404, "User not found");
     }
 
-    // If password missing for this user (social logins)
-    if (!existingUser?.password) {
+    if (!existingUser.password) {
       throw new ApiError(400, "Password login not available for this account");
     }
 
-    // Compare hashed password
+    // ✅ Add this check
+    if (!existingUser.isVerified) {
+      throw new ApiError(403, "Please verify your email before logging in");
+    }
+
     const isMatch = await bcrypt.compare(password, existingUser.password);
     if (!isMatch) {
       throw new ApiError(401, "Invalid email or password");
     }
 
-    // Generate JWT token
     const token = jwtEncode({ userId: existingUser._id, userType });
 
-    // Respond
     res.status(200).json({
       success: true,
       message: "Login successful",
-      user : existingUser,
-      userType ,
+      user: existingUser,
+      userType,
       token,
     });
   }
