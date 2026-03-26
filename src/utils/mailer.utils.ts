@@ -8,11 +8,10 @@ sgMail.setApiKey(process.env.SENDGRID_API_KEY as string);
 export const sendEmail = async (to: string, subject: string, text: string) => {
   const msg = {
     to,
-    from: process.env.SENDGRID_FROM_EMAIL as string, // Must be verified in SendGrid
+    from: process.env.SENDGRID_FROM_EMAIL as string, 
     subject,
     text,
-    // Optional: Add HTML version
-    // html: `<strong>${text}</strong>`,
+  
   };
 
   try {

@@ -526,7 +526,6 @@ const setPricingSchema = z.object({
   reason: z.string().optional()
 });
 
-// Set global pricing for all drivers
 export const setGlobalPricing = asyncHandler(async (req: Request, res: Response) => {
   try {
     console.log("=== SET GLOBAL PRICING DEBUG ===");
@@ -534,91 +533,94 @@ export const setGlobalPricing = asyncHandler(async (req: Request, res: Response)
     console.log("================================");
 
     const authResult = await verifyAuthentication(req);
-    
-    // Check if user is admin
+
     if (authResult.userType !== "admin") {
       throw new ApiError(403, "Only administrators can set global pricing");
     }
 
     const validatedData = setPricingSchema.parse(req.body);
-    const effectiveDate = validatedData.effectiveFrom ? new Date(validatedData.effectiveFrom) : new Date();
+    const effectiveDate = validatedData.effectiveFrom
+      ? new Date(validatedData.effectiveFrom)
+      : new Date();
+
+    // Get a valid admin ObjectId
+    const adminDoc = await Admin.findOne({ email: process.env.ADMIN_EMAIL });
+    const adminId = adminDoc?._id ?? new mongoose.Types.ObjectId();
 
     const session = await mongoose.startSession();
-    let newPricing: any = null; 
+    let newPricing: any = null;
 
     try {
       await session.withTransaction(async () => {
-        // Deactivate all existing pricing
         await GlobalPricing.updateMany(
           { isActive: true },
-          { 
-            $set: { 
+          {
+            $set: {
               isActive: false,
               deactivatedAt: new Date(),
-              deactivatedBy: String(authResult.user._id)
-            }
+              deactivatedBy: adminId,
+            },
           },
           { session }
         );
 
-        // Create new global pricing
-        const pricingArray = await GlobalPricing.create([{
-          pricePerKm: validatedData.pricePerKm,
-          effectiveFrom: effectiveDate,
-          setBy: String(authResult.user._id),
-          reason: validatedData.reason || "Global pricing update",
-          isActive: true
-        }], { session });
+        const pricingArray = await GlobalPricing.create(
+          [
+            {
+              pricePerKm: validatedData.pricePerKm,
+              effectiveFrom: effectiveDate,
+              setBy: adminId,           // ✅ always a valid ObjectId now
+              reason: validatedData.reason || "Global pricing update",
+              isActive: true,
+            },
+          ],
+          { session }
+        );
 
-        newPricing = pricingArray[0]; // Get the first (and only) element
+        newPricing = pricingArray[0];
       });
-
-      await session.commitTransaction();
-
-      // TypeScript now knows newPricing is not null here because the transaction succeeded
-      if (!newPricing) {
-        throw new ApiError(500, "Failed to create pricing record");
-      }
-
-      console.log(`Global pricing set to ₹${validatedData.pricePerKm}/km`);
-
-      res.status(200).json(
-        new ApiResponse(
-          200,
-          { 
-            pricing: newPricing,
-            appliesTo: "All drivers",
-            effectiveFrom: effectiveDate
-          },
-          `Global pricing set to ₹${validatedData.pricePerKm}/km for all drivers`
-        )
-      );
-
-    } catch (error) {
-      await session.abortTransaction();
-      throw error;
+      // ✅ NO commitTransaction() — withTransaction already committed
     } finally {
-      await session.endSession();
+      await session.endSession(); // ✅ NO abortTransaction() — withTransaction already handles it
     }
+
+    if (!newPricing) {
+      throw new ApiError(500, "Failed to create pricing record");
+    }
+
+    console.log(`Global pricing set to ₹${validatedData.pricePerKm}/km`);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          pricing: newPricing,
+          appliesTo: "All drivers",
+          effectiveFrom: effectiveDate,
+        },
+        `Global pricing set to ₹${validatedData.pricePerKm}/km for all drivers`
+      )
+    );
 
   } catch (error: unknown) {
     console.error("=== SET GLOBAL PRICING ERROR ===");
     console.error("Error:", error);
-    console.error("===============================");
-    
+    console.error("================================");
+
     if (error instanceof z.ZodError) {
-      throw new ApiError(400, `Validation failed: ${error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ')}`);
+      throw new ApiError(
+        400,
+        `Validation failed: ${error.errors.map((e) => `${e.path.join(".")}: ${e.message}`).join(", ")}`
+      );
     }
-    
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+
+    if (error instanceof ApiError) throw error;
+
+    const errorMessage =
+      error instanceof Error ? error.message : "Unknown error occurred";
     throw new ApiError(500, `Failed to set global pricing: ${errorMessage}`);
   }
 });
-
 export const getCurrentPricePerKm = async (): Promise<number> => {
   try {
     const currentPricing = await GlobalPricing.findOne({ isActive: true });
@@ -665,4 +667,63 @@ export const getGlobalPricing = asyncHandler(async (req: Request, res: Response)
       error instanceof Error ? error.message : "Unknown error occurred";
     throw new ApiError(500, `Failed to fetch global pricing: ${errorMessage}`);
   }
+});
+
+// Add to your admin controller
+export const getRecentOrders = asyncHandler(async (req: Request, res: Response) => {
+  // Verify admin authentication
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+    throw new ApiError(401, "No token provided");
+  }
+  const token = authHeader.split(" ")[1];
+  const decoded: any = jwt.verify(token, process.env.JWT_SECRET as string);
+  if (!decoded || decoded.role !== "admin") {
+    throw new ApiError(403, "UNAUTHORIZED_ACCESS");
+  }
+
+  // Fetch recent garage bookings with user details
+  const garageBookings = await GarageBooking.find()
+    .sort({ createdAt: -1 })
+    .limit(10)
+    .populate('userId', 'firstName email')   // assuming GarageBooking has userId referencing User
+    .populate('garageId', 'garageName')
+    .lean();
+
+  // Fetch recent parking lot bookings with user details
+  const parkingBookings = await LotRentRecordModel.find()
+    .sort({ rentFrom: -1 })
+    .limit(10)
+    .populate('userId', 'firstName email')   // assuming LotRentRecordModel has userId referencing User
+    .populate('lotId', 'parkingName')
+    .lean();
+
+  // Combine and map to a uniform structure
+  const allOrders = [
+    ...garageBookings.map((booking: any) => ({
+      id: booking._id,
+      user: booking.userId?.firstName || 'Unknown',
+      amount: booking.totalAmount,
+      status: 'completed', // adjust if you have status field
+      date: booking.createdAt,
+      type: 'Garage',
+      serviceName: booking.garageId?.garageName || 'Garage'
+    })),
+    ...parkingBookings.map((booking: any) => ({
+      id: booking._id,
+      user: booking.userId?.firstName || 'Unknown',
+      amount: booking.amountToPaid,
+      status: 'completed',
+      date: booking.rentFrom,
+      type: 'Parking',
+      serviceName: booking.lotId?.parkingName || 'Parking Lot'
+    }))
+  ];
+
+  // Sort by date (newest first) and take top 10
+  const recentOrders = allOrders
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    .slice(0, 10);
+
+  res.status(200).json(new ApiResponse(200, recentOrders, "Recent orders fetched successfully"));
 });

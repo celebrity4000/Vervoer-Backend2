@@ -6,7 +6,7 @@ import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editD
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
 import {completeDriverProfile, getDriverProfile, registerDriverBasic,updateDriverPersonalInfo,updateVehicleInfo, createDriverBankDetails, getDriverAttestationStatus, submitDriverAttestation, uploadDriverProfilePhoto} from "../controllers/driver.controller.js";
-import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin, setGlobalPricing,getGlobalPricing, deleteDryCleaner} from "../controllers/admin.controller.js";
+import { sendAdminOtp ,verifyAdminOtp, getAllUsers,getAllMerchants , deleteUser , deleteMerchant, logoutAdmin,updateAdminBankDetails, getMerchantById ,getAllGarages, deleteGarageById ,getGarageById,getAllDryCleaner,getGarageBookingSummary,adminDeleteParking,adminGetBookingsByParkingLot,adminDeleteResidence,getBankDetailsByAdmin, setGlobalPricing,getGlobalPricing, deleteDryCleaner, getRecentOrders} from "../controllers/admin.controller.js";
 import { getParkingLotbyId, getListOfParkingLot } from "../controllers/merchant.parkinglot.controller.js";
 import { submitQueryToAdmin } from "../controllers/queary.controller.js";
 import { createPayment } from "../controllers/paymentGatway.controller.js";
@@ -239,6 +239,7 @@ router.post("/create-payment", authenticate, createPayment);
 router.post("/admin/send-otp", sendAdminOtp);
 router.post("/admin/verify-otp", verifyAdminOtp);
 router.get("/admin/get-all-users", isAdmin, getAllUsers);
+router.get('/recent-orders', isAdmin, getRecentOrders);
 router.get("/admin/get-all-merchants", isAdmin, getAllMerchants);
 router.delete("/admin/delete-user/:userId", isAdmin, deleteUser);
 router.delete("/admin/delete-merchant/:merchantId", isAdmin, deleteMerchant);
