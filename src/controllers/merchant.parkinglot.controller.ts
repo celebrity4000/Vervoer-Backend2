@@ -247,6 +247,8 @@ const LotCheckOutData = z
       to: z.iso.datetime(),
     }),
     couponCode: z.string().optional(),
+    vehicleNumber: z.string().optional(),   
+    paymentMethod: z.string().optional(), 
   })
   .refine((data) => data.bookingPeriod.from < data.bookingPeriod.to);
 type LotCheckOutData = z.infer<typeof LotCheckOutData>;
