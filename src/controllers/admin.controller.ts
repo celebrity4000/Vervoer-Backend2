@@ -671,7 +671,7 @@ export const getGlobalPricing = asyncHandler(async (req: Request, res: Response)
 
 // Add to your admin controller
 export const getRecentOrders = asyncHandler(async (req: Request, res: Response) => {
-  // Verify admin authentication
+  // Auth check
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
     throw new ApiError(401, "No token provided");
@@ -681,49 +681,125 @@ export const getRecentOrders = asyncHandler(async (req: Request, res: Response) 
   if (!decoded || decoded.role !== "admin") {
     throw new ApiError(403, "UNAUTHORIZED_ACCESS");
   }
-
-  // Fetch recent garage bookings with user details
+ 
+  // ── 1. GARAGE BOOKINGS ──────────────────────────────────────
+  // Fields: customerId (ref User), garageId (ref Garage), amountToPaid, bookedSlot, paymentDetails.status, createdAt
   const garageBookings = await GarageBooking.find()
     .sort({ createdAt: -1 })
-    .limit(10)
-    .populate('userId', 'firstName email')   // assuming GarageBooking has userId referencing User
-    .populate('garageId', 'garageName')
+    .limit(20)
+    .populate("customerId", "firstName email")
+    .populate("garageId", "garageName address")
     .lean();
-
-  // Fetch recent parking lot bookings with user details
+ 
+  // ── 2. PARKING LOT BOOKINGS ─────────────────────────────────
+  // Fields: renterInfo (ref User), lotId (ref ParkingLot), amountToPaid, rentedSlot, paymentDetails.status, rentFrom
   const parkingBookings = await LotRentRecordModel.find()
     .sort({ rentFrom: -1 })
-    .limit(10)
-    .populate('userId', 'firstName email')   // assuming LotRentRecordModel has userId referencing User
-    .populate('lotId', 'parkingName')
+    .limit(20)
+    .populate("renterInfo", "firstName email")   // ✅ correct field: renterInfo
+    .populate("lotId", "parkingName address")
     .lean();
-
-  // Combine and map to a uniform structure
+ 
+  // ── 3. RESIDENCE BOOKINGS ────────────────────────────────────
+  // Add your ResidenceBooking model import when ready
+  // const residenceBookings = await ResidenceBooking.find()
+  //   .sort({ createdAt: -1 })
+  //   .limit(20)
+  //   .populate("userId", "firstName email")
+  //   .populate("residenceId", "name address")
+  //   .lean();
+ 
+  // ── 4. DRY CLEANER ORDERS ────────────────────────────────────
+  // Add your DryCleanerOrder model import when ready
+  // const dryCleanerOrders = await DryCleanerOrder.find()
+  //   .sort({ createdAt: -1 })
+  //   .limit(20)
+  //   .populate("userId", "firstName email")
+  //   .populate("shopId", "shopname")
+  //   .lean();
+ 
+  // ── MAP TO UNIFIED FORMAT ────────────────────────────────────
+  const normalizeStatus = (status: string | undefined): string => {
+    if (!status) return "pending";
+    const s = status.toUpperCase();
+    if (s === "SUCCESS") return "completed";
+    if (s === "FAILED") return "failed";
+    return "pending";
+  };
+ 
   const allOrders = [
-    ...garageBookings.map((booking: any) => ({
-      id: booking._id,
-      user: booking.userId?.firstName || 'Unknown',
-      amount: booking.totalAmount,
-      status: 'completed', // adjust if you have status field
-      date: booking.createdAt,
-      type: 'Garage',
-      serviceName: booking.garageId?.garageName || 'Garage'
+    ...garageBookings.map((b: any) => ({
+      id: b._id.toString(),
+      user: b.customerId?.firstName || "Unknown",
+      email: b.customerId?.email || "",
+      amount: b.amountToPaid ?? b.totalAmount ?? 0,
+      status: normalizeStatus(b.paymentDetails?.status),
+      date: b.createdAt,
+      type: "Garage",
+      typeColor: "#6366f1",
+      serviceName: b.garageId?.garageName || "Garage",
+      serviceAddress: b.garageId?.address || "",
+      slot: b.bookedSlot || "",
+      paymentMethod: b.paymentDetails?.method || "N/A",
     })),
-    ...parkingBookings.map((booking: any) => ({
-      id: booking._id,
-      user: booking.userId?.firstName || 'Unknown',
-      amount: booking.amountToPaid,
-      status: 'completed',
-      date: booking.rentFrom,
-      type: 'Parking',
-      serviceName: booking.lotId?.parkingName || 'Parking Lot'
-    }))
+ 
+    ...parkingBookings.map((b: any) => ({
+      id: b._id.toString(),
+      user: b.renterInfo?.firstName || "Unknown",  // ✅ renterInfo not userId/customerId
+      email: b.renterInfo?.email || "",
+      amount: b.amountToPaid ?? b.totalAmount ?? 0,
+      status: normalizeStatus(b.paymentDetails?.status),
+      date: b.rentFrom,
+      type: "Parking",
+      typeColor: "#10b981",
+      serviceName: b.lotId?.parkingName || "Parking Lot",
+      serviceAddress: b.lotId?.address || "",
+      slot: b.rentedSlot || "",
+      paymentMethod: b.paymentDetails?.paymentMethod || "N/A",
+    })),
+ 
+    // Uncomment when models are ready:
+    // ...residenceBookings.map((b: any) => ({
+    //   id: b._id.toString(),
+    //   user: b.userId?.firstName || "Unknown",
+    //   email: b.userId?.email || "",
+    //   amount: b.amountToPaid ?? 0,
+    //   status: normalizeStatus(b.paymentDetails?.status),
+    //   date: b.createdAt,
+    //   type: "Residence",
+    //   typeColor: "#f59e0b",
+    //   serviceName: b.residenceId?.name || "Residence",
+    //   serviceAddress: b.residenceId?.address || "",
+    //   slot: "",
+    //   paymentMethod: b.paymentDetails?.method || "N/A",
+    // })),
+ 
+    // ...dryCleanerOrders.map((b: any) => ({
+    //   id: b._id.toString(),
+    //   user: b.userId?.firstName || "Unknown",
+    //   email: b.userId?.email || "",
+    //   amount: b.totalAmount ?? 0,
+    //   status: normalizeStatus(b.status),
+    //   date: b.createdAt,
+    //   type: "DryCleaner",
+    //   typeColor: "#ec4899",
+    //   serviceName: b.shopId?.shopname || "Dry Cleaner",
+    //   serviceAddress: "",
+    //   slot: "",
+    //   paymentMethod: b.paymentDetails?.method || "N/A",
+    // })),
   ];
-
-  // Sort by date (newest first) and take top 10
+ 
+  // Sort by date descending, take top 20
   const recentOrders = allOrders
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-    .slice(0, 10);
-
-  res.status(200).json(new ApiResponse(200, recentOrders, "Recent orders fetched successfully"));
+    .slice(0, 20);
+ 
+  // ── STATS: total revenue + order counts ─────────────────────
+  const totalRevenue = recentOrders.reduce((sum, o) => sum + (o.amount || 0), 0);
+  const totalOrders = recentOrders.length;
+ 
+  res.status(200).json(
+    new ApiResponse(200, { orders: recentOrders, totalRevenue, totalOrders }, "Recent orders fetched successfully")
+  );
 });

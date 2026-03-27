@@ -15,7 +15,7 @@ dotenv.config({
 
 const app: Application = express();
 const httpServer = createServer(app);
-
+console.log('🔑 Stripe key in use:', process.env.STRIPE_SECRET_KEY?.substring(0, 20));
 // CORS middleware here ⬇
 app.use(cors({
   origin: ["http://localhost:5173", "https://admin-self-seven-79.vercel.app"],
