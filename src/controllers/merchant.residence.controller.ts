@@ -286,8 +286,9 @@ const verifyCouponCode = (c: string) => c.startsWith("XES") ? 0.1 : 0;
 export const verifyResidenceBooking = asyncHandler(async (req, res) => {
   let session: mongoose.ClientSession | undefined;
   try {
-    console.log("Verifying the booking");
-    const { bookingId, carLicensePlateImage } = req.body;
+    const { bookingId, carLicensePlateImage, paymentMethod } = req.body;
+    const isCashPayment = paymentMethod === "CASH";
+
     if (!(bookingId && carLicensePlateImage)) throw new ApiError(400, "NO_BOOKINGID");
 
     const verifiedUser = await verifyAuthentication(req);
@@ -311,12 +312,19 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
     const bookingTo = new Date(booking.bookingPeriod.to);
     const isBooking = await findBookedResidenceIn(bookingFrom, bookingTo, booking.residenceId.toString());
 
-    if (!booking.paymentDetails.StripePaymentDetails?.paymentIntentId) throw new ApiError(400, "NO STRIPE RECORD FOUND");
-
-    const stripRes = await verifyStripePayment(booking.paymentDetails.StripePaymentDetails.paymentIntentId);
-    if (!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION");
+    // ✅ Skip Stripe verification for CASH payments
+    if (!isCashPayment) {
+      if (!booking.paymentDetails.StripePaymentDetails?.paymentIntentId) {
+        throw new ApiError(400, "NO STRIPE RECORD FOUND");
+      }
+      const stripRes = await verifyStripePayment(
+        booking.paymentDetails.StripePaymentDetails.paymentIntentId
+      );
+      if (!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION");
+    }
 
     booking.paymentDetails.paidAt = new Date();
+
     if (isBooking.length > 0) {
       booking.paymentDetails.status = "FAILED";
       await booking.save();
@@ -325,7 +333,8 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
 
     booking.vehicleNumber = carLicensePlateImage;
     booking.paymentDetails.status = "SUCCESS";
-    booking.save();
+    booking.paymentDetails.method = isCashPayment ? "CASH" : "STRIPE";
+    await booking.save();
     await session.commitTransaction();
 
     res.status(201).json(new ApiResponse(201, { booking }));

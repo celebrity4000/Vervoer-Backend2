@@ -570,9 +570,13 @@ export const bookASlot = asyncHandler(async (req, res) => {
       throw new ApiError(401, "User must be a verified user");
     }
 
-    const rData = BookingData.partial().parse(req.body);
+    // ✅ Read paymentMethod directly from body before Zod parsing
+    const paymentMethod = req.body.paymentMethod as string | undefined;
+    const isCashPayment = paymentMethod === "CASH";
 
+    const rData = BookingData.partial().parse(req.body);
     const { carLicensePlateImage } = rData;
+
     if (!carLicensePlateImage || typeof carLicensePlateImage !== "string") {
       throw new ApiError(400, "Car license plate image string is required");
     }
@@ -584,9 +588,9 @@ export const bookASlot = asyncHandler(async (req, res) => {
     const rentRecord = await LotRentRecordModel.findById(rData.bookingId);
     if (!rentRecord) throw new ApiError(400, "Invalid bookingId");
 
-    await LotRentRecordModel.createCollection();
     session = await LotRentRecordModel.startSession();
     session.startTransaction();
+
     const existbooked = await findExistingBooking(
       rentRecord.rentFrom,
       rentRecord.rentTo,
@@ -594,38 +598,36 @@ export const bookASlot = asyncHandler(async (req, res) => {
       rentRecord.rentedSlot,
     );
 
-    if (!rentRecord.paymentDetails.stripePaymentDetails?.paymentIntentId) {
-      throw new ApiError(400, "NO STRIPE RECORD FOUND");
+    // ✅ Skip Stripe verification entirely for CASH payments
+    if (!isCashPayment) {
+      if (!rentRecord.paymentDetails.stripePaymentDetails?.paymentIntentId) {
+        throw new ApiError(400, "NO STRIPE RECORD FOUND");
+      }
+      const stripRes = await verifyStripePayment(
+        rentRecord.paymentDetails.stripePaymentDetails.paymentIntentId,
+      );
+      if (!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION");
     }
 
-    const stripRes = await verifyStripePayment(
-      rentRecord.paymentDetails.stripePaymentDetails.paymentIntentId,
-    );
-    if (!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION");
     if (existbooked.length > 0) {
       rentRecord.paymentDetails.status = "FAILED";
       await rentRecord.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
 
-    ((rentRecord.paymentDetails.status = "SUCCESS"),
-      (rentRecord.paymentDetails.paidAt = new Date()));
-    rentRecord.save();
+    rentRecord.paymentDetails.status = "SUCCESS";
+    rentRecord.paymentDetails.paidAt = new Date();
+    rentRecord.paymentDetails.paymentMethod = isCashPayment ? "CASH" : "STRIPE";
+    await rentRecord.save();
+
     await session.commitTransaction();
     session = undefined;
 
-    res
-      .status(201)
-      .json(
-        new ApiResponse(
-          201,
-          { booking: rentRecord },
-          "Slot booked successfully",
-        ),
-      );
+    res.status(201).json(
+      new ApiResponse(201, { booking: rentRecord }, "Slot booked successfully"),
+    );
   } catch (err) {
     if (session) await session.abortTransaction();
-
     if (err instanceof z.ZodError) {
       console.error(err);
       throw new ApiError(400, "Invalid booking data");
