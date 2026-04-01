@@ -12,7 +12,7 @@ import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import { z } from "zod";
 import { BookingNotificationManager } from "../middleware/BookingNotificationService.js";
 import { getCurrentPricePerKm } from "./admin.controller.js";
-import Stripe from 'stripe';
+import Stripe from "stripe";
 import { v4 as uuidv4 } from "uuid";
 import { ParsedQs } from "qs";
 import express from "express";
@@ -24,10 +24,7 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-06-30.basil",
 });
 
-
-const toString = (
-  v: string | ParsedQs | (string | ParsedQs)[]
-): string => {
+const toString = (v: string | ParsedQs | (string | ParsedQs)[]): string => {
   if (Array.isArray(v)) {
     return v.length > 0 ? String(v[0]) : "";
   }
@@ -64,7 +61,7 @@ const scheduledBookingRequestSchema = z.object({
     .string()
     .regex(
       /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/,
-      "Invalid time format. Use HH:MM"
+      "Invalid time format. Use HH:MM",
     ),
 });
 
@@ -108,7 +105,7 @@ export const createScheduledBookingRequest = asyncHandler(
         if (createdBooking) {
           setTimeout(async () => {
             await BookingNotificationManager.notifyDriverOfNewBooking(
-              String(createdBooking._id)
+              String(createdBooking._id),
             );
           }, 100);
         }
@@ -135,7 +132,7 @@ export const createScheduledBookingRequest = asyncHandler(
         if (existingRequest) {
           throw new ApiError(
             400,
-            "You already have a pending booking request with this driver for this date"
+            "You already have a pending booking request with this driver for this date",
           );
         }
 
@@ -153,11 +150,11 @@ export const createScheduledBookingRequest = asyncHandler(
         if (scheduledDateTime < oneHourFromNow) {
           throw new ApiError(
             400,
-            "Pickup must be scheduled at least 1 hour in advance"
+            "Pickup must be scheduled at least 1 hour in advance",
           );
         }
 
-        // Calculate price (₹10 per km)
+        // Calculate price ($10 per km)
         const price = data.distance * 10;
 
         // Set addresses - pickup is always user's address, delivery is dry cleaner
@@ -184,7 +181,7 @@ export const createScheduledBookingRequest = asyncHandler(
               isScheduled: true,
             },
           ],
-          { session }
+          { session },
         );
 
         createdBooking = booking[0];
@@ -192,7 +189,7 @@ export const createScheduledBookingRequest = asyncHandler(
         // Send notification to driver
         setTimeout(async () => {
           await BookingNotificationManager.notifyDriverOfNewBooking(
-            createdBooking._id.toString()
+            createdBooking._id.toString(),
           );
         }, 100);
       });
@@ -205,8 +202,8 @@ export const createScheduledBookingRequest = asyncHandler(
           new ApiResponse(
             201,
             { booking: createdBooking },
-            "Scheduled booking request sent to driver"
-          )
+            "Scheduled booking request sent to driver",
+          ),
         );
     } catch (error) {
       await session.abortTransaction();
@@ -214,7 +211,7 @@ export const createScheduledBookingRequest = asyncHandler(
     } finally {
       await session.endSession();
     }
-  }
+  },
 );
 
 // Get Available Drivers for Scheduling
@@ -239,7 +236,7 @@ export const getAvailableDriversForScheduling = asyncHandler(
 
     // Get all drivers
     const allDrivers = await Driver.find({ isActive: true }).select(
-      "firstName lastName phoneNumber vehicleInfo profileImage rating"
+      "firstName lastName phoneNumber vehicleInfo profileImage rating",
     );
 
     // Check which drivers are available at the requested time
@@ -279,10 +276,10 @@ export const getAvailableDriversForScheduling = asyncHandler(
           requestedDateTime: requestedDateTime,
           totalAvailable: availableDrivers.length,
         },
-        `Found ${availableDrivers.length} available drivers for the requested time`
-      )
+        `Found ${availableDrivers.length} available drivers for the requested time`,
+      ),
     );
-  }
+  },
 );
 
 // Get User's Booking Requests (Enhanced with scheduling info)
@@ -315,7 +312,7 @@ export const getUserBookingRequests = asyncHandler(
     const bookings = await Booking.find(filter)
       .populate(
         "driver",
-        "firstName lastName phoneNumber vehicleInfo.vehicleNumber profileImage rating"
+        "firstName lastName phoneNumber vehicleInfo.vehicleNumber profileImage rating",
       )
       .populate("dryCleaner", "shopname address phoneNumber")
       .sort({ createdAt: -1 })
@@ -336,10 +333,10 @@ export const getUserBookingRequests = asyncHandler(
             pages: Math.ceil(total / limit),
           },
         },
-        "User booking requests retrieved successfully"
-      )
+        "User booking requests retrieved successfully",
+      ),
     );
-  }
+  },
 );
 
 // Cancel Booking Request (Enhanced for scheduled bookings)
@@ -377,7 +374,7 @@ export const cancelBookingRequest = asyncHandler(
         if (!["pending", "accepted"].includes(booking.status)) {
           throw new ApiError(
             400,
-            `Cannot cancel booking with status: ${booking.status}`
+            `Cannot cancel booking with status: ${booking.status}`,
           );
         }
 
@@ -385,13 +382,13 @@ export const cancelBookingRequest = asyncHandler(
         if (booking.isScheduled && booking.scheduledPickupDateTime) {
           const thirtyMinutesFromNow = new Date();
           thirtyMinutesFromNow.setMinutes(
-            thirtyMinutesFromNow.getMinutes() + 30
+            thirtyMinutesFromNow.getMinutes() + 30,
           );
 
           if (booking.scheduledPickupDateTime < thirtyMinutesFromNow) {
             throw new ApiError(
               400,
-              "Cannot cancel scheduled booking less than 30 minutes before pickup time"
+              "Cannot cancel scheduled booking less than 30 minutes before pickup time",
             );
           }
         }
@@ -419,7 +416,7 @@ export const cancelBookingRequest = asyncHandler(
       res
         .status(200)
         .json(
-          new ApiResponse(200, null, "Booking request cancelled successfully")
+          new ApiResponse(200, null, "Booking request cancelled successfully"),
         );
     } catch (error) {
       await session.abortTransaction();
@@ -427,7 +424,7 @@ export const cancelBookingRequest = asyncHandler(
     } finally {
       await session.endSession();
     }
-  }
+  },
 );
 
 // ===== DRIVER CONTROLLERS =====
@@ -444,7 +441,7 @@ export const getDriverBookingRequests = asyncHandler(
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(
       50,
-      Math.max(1, parseInt(req.query.limit as string) || 10)
+      Math.max(1, parseInt(req.query.limit as string) || 10),
     );
     const status = req.query.status as string;
     const bookingType = req.query.bookingType as string; // 'scheduled' or 'immediate'
@@ -468,7 +465,7 @@ export const getDriverBookingRequests = asyncHandler(
         .populate("dryCleaner", "shopname address phoneNumber")
         .sort({
           scheduledPickupDateTime: 1, // sort scheduled bookings first
-          createdAt: -1,              // latest first
+          createdAt: -1, // latest first
         })
         .limit(limit)
         .skip((page - 1) * limit)
@@ -498,16 +495,15 @@ export const getDriverBookingRequests = asyncHandler(
           },
           total > 0
             ? `Found ${total} booking${total > 1 ? "s" : ""}`
-            : "No bookings found"
-        )
+            : "No bookings found",
+        ),
       );
     } catch (error) {
       console.error("Error fetching booking requests:", error);
       throw new ApiError(500, "Failed to fetch booking requests");
     }
-  }
+  },
 );
-
 
 // Driver Responds to Booking Request (Enhanced for scheduled bookings)
 // export const respondToBookingRequest = asyncHandler(
@@ -516,10 +512,10 @@ export const getDriverBookingRequests = asyncHandler(
 //     if (authResult.userType !== "driver") {
 //       throw new ApiError(403, "Only drivers can accept booking requests");
 //     }
-    
+
 //     const driverId = authResult.user._id;
 //     const { bookingId } = req.body;
-    
+
 //     if (!mongoose.Types.ObjectId.isValid(bookingId)) {
 //       throw new ApiError(400, "Invalid booking ID format");
 //     }
@@ -527,16 +523,16 @@ export const getDriverBookingRequests = asyncHandler(
 //     try {
 //       // Find and update the booking in one operation
 //       const updatedBooking = await Booking.findOneAndUpdate(
-//         { 
-//           _id: bookingId, 
-//           status: "pending" 
+//         {
+//           _id: bookingId,
+//           status: "pending"
 //         },
-//         { 
+//         {
 //           driver: driverId,
 //           status: "accepted",
 //           acceptedAt: new Date()
 //         },
-//         { 
+//         {
 //           new: true // Return the updated document
 //         }
 //       );
@@ -560,11 +556,11 @@ export const getDriverBookingRequests = asyncHandler(
 
 //     } catch (error: any) {
 //       console.error("Accept booking error:", error);
-      
+
 //       if (error instanceof ApiError) {
 //         throw error;
 //       }
-      
+
 //       throw new ApiError(
 //         500,
 //         `Failed to accept booking: ${error?.message || "Unknown error"}`
@@ -580,14 +576,14 @@ export const getDriverBookingRequests = asyncHandler(
 //     if (authResult.userType !== "driver") {
 //       throw new ApiError(403, "Only drivers can access booking requests");
 //     }
-    
+
 //     const driverId = authResult.user._id;
-    
+
 //     try {
 //       // Find driver to check status and location
 //       const driver = await Driver.findById(driverId)
 //         .populate('userId', 'fullName email phoneNumber');
-      
+
 //       if (!driver) {
 //         throw new ApiError(404, "Driver profile not found");
 //       }
@@ -664,8 +660,8 @@ export const getDriverBookingRequests = asyncHandler(
 //               canAcceptNewBookings: !driver.isBooked || driver.canAcceptScheduled
 //             },
 //             totalAvailable: transformedBookings.length,
-//             message: transformedBookings.length === 0 ? 
-//               (driver.isBooked ? 
+//             message: transformedBookings.length === 0 ?
+//               (driver.isBooked ?
 //                 "No new scheduled requests available. Complete current booking to see immediate requests." :
 //                 "No booking requests available at the moment."
 //               ) : undefined
@@ -676,11 +672,11 @@ export const getDriverBookingRequests = asyncHandler(
 
 //     } catch (error) {
 //       console.error("Get driver requests error:", error);
-      
+
 //       if (error instanceof ApiError) {
 //         throw error;
 //       }
-      
+
 //       throw new ApiError(
 //         500,
 //         `Failed to fetch driver requests: ${error?.message || "Unknown error"}`
@@ -707,7 +703,7 @@ export const getDriverScheduledBookings = asyncHandler(
       const startOfDay = new Date(
         now.getFullYear(),
         now.getMonth(),
-        now.getDate()
+        now.getDate(),
       );
       const endOfDay = new Date(
         now.getFullYear(),
@@ -715,7 +711,7 @@ export const getDriverScheduledBookings = asyncHandler(
         now.getDate(),
         23,
         59,
-        59
+        59,
       );
       dateFilter = {
         scheduledPickupDateTime: {
@@ -751,10 +747,10 @@ export const getDriverScheduledBookings = asyncHandler(
           filter,
           count: scheduledBookings.length,
         },
-        `Retrieved ${scheduledBookings.length} scheduled bookings`
-      )
+        `Retrieved ${scheduledBookings.length} scheduled bookings`,
+      ),
     );
-  }
+  },
 );
 
 // Start Scheduled Trip (When it's time for pickup)
@@ -792,23 +788,23 @@ export const startScheduledTrip = asyncHandler(
         const now = new Date();
         const scheduledTime = booking.scheduledPickupDateTime!;
         const thirtyMinutesBefore = new Date(
-          scheduledTime.getTime() - 30 * 60 * 1000
+          scheduledTime.getTime() - 30 * 60 * 1000,
         );
         const thirtyMinutesAfter = new Date(
-          scheduledTime.getTime() + 30 * 60 * 1000
+          scheduledTime.getTime() + 30 * 60 * 1000,
         );
 
         if (now < thirtyMinutesBefore) {
           throw new ApiError(
             400,
-            "Too early to start this trip. You can start 30 minutes before scheduled time."
+            "Too early to start this trip. You can start 30 minutes before scheduled time.",
           );
         }
 
         if (now > thirtyMinutesAfter) {
           throw new ApiError(
             400,
-            "This scheduled booking has expired. Please contact the customer."
+            "This scheduled booking has expired. Please contact the customer.",
           );
         }
 
@@ -823,7 +819,7 @@ export const startScheduledTrip = asyncHandler(
           {
             session,
             new: true,
-          }
+          },
         );
 
         // Mark driver as currently busy
@@ -849,8 +845,8 @@ export const startScheduledTrip = asyncHandler(
             status: "active",
             startedAt: new Date(),
           },
-          "Scheduled trip started successfully"
-        )
+          "Scheduled trip started successfully",
+        ),
       );
     } catch (error: any) {
       await session.abortTransaction();
@@ -860,13 +856,13 @@ export const startScheduledTrip = asyncHandler(
       } else {
         throw new ApiError(
           500,
-          `Internal server error: ${error?.message || "Unknown error"}`
+          `Internal server error: ${error?.message || "Unknown error"}`,
         );
       }
     } finally {
       await session.endSession();
     }
-  }
+  },
 );
 
 // Complete Trip (Enhanced for scheduled bookings)
@@ -914,7 +910,7 @@ export const completeTrip = asyncHandler(
         // Send notification to user about trip completion
         setTimeout(async () => {
           await BookingNotificationManager.notifyUserOfTripCompletion(
-            bookingId
+            bookingId,
           );
         }, 100);
       });
@@ -927,8 +923,8 @@ export const completeTrip = asyncHandler(
           new ApiResponse(
             200,
             null,
-            "Trip completed successfully. You are now available for new bookings"
-          )
+            "Trip completed successfully. You are now available for new bookings",
+          ),
         );
     } catch (error) {
       await session.abortTransaction();
@@ -936,7 +932,7 @@ export const completeTrip = asyncHandler(
     } finally {
       await session.endSession();
     }
-  }
+  },
 );
 
 // Get Active Booking (Enhanced)
@@ -961,7 +957,7 @@ export const getActiveBooking = asyncHandler(
       res
         .status(200)
         .json(
-          new ApiResponse(200, { booking: null }, "No active booking found")
+          new ApiResponse(200, { booking: null }, "No active booking found"),
         );
       return;
     }
@@ -972,10 +968,10 @@ export const getActiveBooking = asyncHandler(
         new ApiResponse(
           200,
           { booking },
-          "Active booking retrieved successfully"
-        )
+          "Active booking retrieved successfully",
+        ),
       );
-  }
+  },
 );
 
 // Rest of the existing functions remain the same...
@@ -1012,7 +1008,7 @@ export const setAvailabilityStatus = asyncHandler(
           if (activeBooking) {
             throw new ApiError(
               400,
-              "Cannot set unavailable while having active bookings"
+              "Cannot set unavailable while having active bookings",
             );
           }
         }
@@ -1036,7 +1032,7 @@ export const setAvailabilityStatus = asyncHandler(
     } finally {
       await session.endSession();
     }
-  }
+  },
 );
 
 // Get Driver Booking History (Enhanced)
@@ -1059,7 +1055,7 @@ export const getDriverBookingHistory = asyncHandler(
     if (
       status &&
       ["accepted", "active", "completed", "cancelled", "rejected"].includes(
-        status
+        status,
       )
     ) {
       filter.status = status;
@@ -1089,7 +1085,7 @@ export const getDriverBookingHistory = asyncHandler(
 
     const totalEarnings = completedBookings.reduce(
       (sum, booking) => sum + booking.price,
-      0
+      0,
     );
 
     res.status(200).json(
@@ -1106,24 +1102,23 @@ export const getDriverBookingHistory = asyncHandler(
           totalEarnings,
           totalCompletedTrips: completedBookings.length,
         },
-        "Driver booking history retrieved successfully"
-      )
+        "Driver booking history retrieved successfully",
+      ),
     );
-  }
+  },
 );
 
-
-
-
 // Add this utility function for consistent price calculation across your app:
-export const calculateBookingPrice = async (distance: number): Promise<{ price: number, pricePerKm: number }> => {
+export const calculateBookingPrice = async (
+  distance: number,
+): Promise<{ price: number; pricePerKm: number }> => {
   try {
     const pricePerKm = await getCurrentPricePerKm();
     const price = distance * pricePerKm;
-    
+
     return {
-      price: Math.round(price * 100) / 100, 
-      pricePerKm: pricePerKm
+      price: Math.round(price * 100) / 100,
+      pricePerKm: pricePerKm,
     };
   } catch (error) {
     console.error("Error calculating booking price:", error);
@@ -1131,520 +1126,576 @@ export const calculateBookingPrice = async (distance: number): Promise<{ price: 
     const defaultPrice = distance * 10;
     return {
       price: defaultPrice,
-      pricePerKm: 10
+      pricePerKm: 10,
     };
   }
 };
 
+export const createBooking = asyncHandler(
+  async (req: Request, res: Response) => {
+    try {
+      const authResult = await verifyAuthentication(req);
+      if (authResult.userType !== "user") {
+        throw new ApiError(403, "Only users can create bookings");
+      }
 
+      const userId = authResult.user._id;
+      const {
+        dryCleaner,
+        pickupAddress,
+        dropoffAddress,
+        orderItems,
+        pricing,
+        deliveryCharge,
+        scheduledPickupDateTime,
+        scheduledDeliveryDateTime,
+        distance,
+        time,
+        paymentMethod,
+        message,
+        orderNumber,
+      } = req.body;
 
-export const createBooking = asyncHandler(async (req: Request, res: Response) => {
-  try {
-    
+      // Enhanced validation with specific error messages
+      console.log("🔍 Validating fields:", {
+        hasDryCleaner: !!dryCleaner,
+        hasPickupAddress: !!pickupAddress,
+        hasDropoffAddress: !!dropoffAddress,
+        hasOrderItems: !!orderItems,
+        hasDeliveryCharge: !!deliveryCharge,
+        deliveryChargeValue: deliveryCharge,
+        orderItemsLength: orderItems?.length,
+        hasPricing: !!pricing,
+        hasScheduledPickup: !!scheduledPickupDateTime,
+        orderNumber: orderNumber,
+      });
+
+      if (!dryCleaner) throw new ApiError(400, "Dry cleaner ID is required");
+      if (!pickupAddress) throw new ApiError(400, "Pickup address is required");
+      if (!dropoffAddress)
+        throw new ApiError(400, "Dropoff address is required");
+      if (!orderItems) throw new ApiError(400, "Order items are required");
+      if (!pricing) throw new ApiError(400, "Pricing information is required");
+      if (!orderItems || orderItems.length === 0) {
+        throw new ApiError(400, "At least one order item is required");
+      }
+      if (!scheduledPickupDateTime) {
+        throw new ApiError(400, "Scheduled pickup date and time is required");
+      }
+      if (!orderNumber) {
+        throw new ApiError(400, "Order number is required");
+      }
+
+      // Validate date formats
+      const pickupDate = new Date(scheduledPickupDateTime);
+      if (isNaN(pickupDate.getTime())) {
+        throw new ApiError(400, "Invalid pickup date format");
+      }
+
+      let deliveryDate = null;
+      if (scheduledDeliveryDateTime) {
+        deliveryDate = new Date(scheduledDeliveryDateTime);
+        if (isNaN(deliveryDate.getTime())) {
+          throw new ApiError(400, "Invalid delivery date format");
+        }
+      }
+
+      // Check if orderNumber is unique
+      const existingBooking = await Booking.findOne({ orderNumber });
+      if (existingBooking) {
+        throw new ApiError(400, `Order number ${orderNumber} already exists`);
+      }
+
+      const trackingId = `TRK-${Date.now()}-${uuidv4().slice(0, 6)}`;
+
+      console.log("🔍 Creating booking with data:", {
+        userId,
+        dryCleaner,
+        orderNumber,
+        trackingId,
+        itemsCount: orderItems.length,
+        deliveryCharge,
+        totalAmount: pricing.totalAmount,
+      });
+
+      const booking = new Booking({
+        user: userId,
+        dryCleaner,
+        pickupAddress,
+        dropoffAddress,
+        orderItems,
+        pricing,
+        deliveryCharge,
+        distance: distance || 10,
+        time: time || 30,
+        price: pricing.totalAmount,
+        bookingType: "pickup",
+        paymentMethod: paymentMethod || "CREDIT",
+        paymentStatus: "pending",
+        isScheduled: true,
+        scheduledPickupDateTime: pickupDate,
+        scheduledDeliveryDateTime: deliveryDate,
+        message,
+        status: "pending",
+        orderNumber,
+        Tracking_ID: trackingId,
+      });
+
+      const savedBooking = await booking.save();
+
+      const populatedBooking = await Booking.findById(savedBooking._id)
+        .populate("user", "firstName lastName phoneNumber email")
+        .populate("dryCleaner", "shopname address phoneNumber");
+
+      res
+        .status(201)
+        .json(
+          new ApiResponse(
+            201,
+            populatedBooking,
+            "Booking created successfully",
+          ),
+        );
+    } catch (error: any) {
+      console.error("❌ Error creating booking:");
+      console.error("Error name:", error.name);
+      console.error("Error message:", error.message);
+      console.error("Error code:", error.code);
+      console.error("Error stack:", error.stack);
+
+      if (error.errors) {
+        console.error("Validation errors:", error.errors);
+      }
+
+      if (error.keyPattern) {
+        console.error("Duplicate key pattern:", error.keyPattern);
+      }
+
+      // Re-throw ApiErrors as-is
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      // Handle MongoDB duplicate key error
+      if (error.code === 11000) {
+        throw new ApiError(400, "Duplicate order number or tracking ID");
+      }
+
+      // Handle validation errors
+      if (error.name === "ValidationError") {
+        const validationMessages = Object.values(error.errors).map(
+          (err: any) => err.message,
+        );
+        throw new ApiError(
+          400,
+          `Validation failed: ${validationMessages.join(", ")}`,
+        );
+      }
+
+      throw new ApiError(500, `Failed to create booking: ${error.message}`);
+    }
+  },
+);
+
+/* ------------------------------------------------------------------ */
+export const createPaymentIntent = asyncHandler(
+  async (req: Request, res: Response) => {
+    // ✅ ADD: Log Stripe key mode at the start
+    console.log("🔑 ============================================");
+    console.log("🔑 STRIPE KEY MODE CHECK:");
+    console.log(
+      "🔑 Backend Stripe Key Prefix:",
+      process.env.STRIPE_SECRET_KEY?.substring(0, 10),
+    );
+    console.log(
+      "🔑 Is Test Mode:",
+      process.env.STRIPE_SECRET_KEY?.startsWith("sk_test_"),
+    );
+    console.log(
+      "🔑 Is Live Mode:",
+      process.env.STRIPE_SECRET_KEY?.startsWith("sk_live_"),
+    );
+    console.log("🔑 ============================================");
+
     const authResult = await verifyAuthentication(req);
     if (authResult.userType !== "user") {
-      throw new ApiError(403, "Only users can create bookings");
+      throw new ApiError(403, "Only users can create payment intents");
     }
-    
-    const userId = authResult.user._id;
-    const {
-      dryCleaner,
-      pickupAddress,
-      dropoffAddress,
-      orderItems,
-      pricing,
-      deliveryCharge,
-      scheduledPickupDateTime,
-      scheduledDeliveryDateTime,
-      distance,
-      time,
-      paymentMethod,
-      message,
+
+    const { bookingId, amount, currency = "usd", orderNumber } = req.body;
+
+    console.log("💳 Payment Intent Request:", {
+      bookingId,
+      amount,
+      currency,
       orderNumber,
-    } = req.body;
-
-    // Enhanced validation with specific error messages
-    console.log('🔍 Validating fields:', {
-      hasDryCleaner: !!dryCleaner,
-      hasPickupAddress: !!pickupAddress,
-      hasDropoffAddress: !!dropoffAddress,
-      hasOrderItems: !!orderItems,
-      hasDeliveryCharge: !!deliveryCharge, 
-      deliveryChargeValue: deliveryCharge,
-      orderItemsLength: orderItems?.length,
-      hasPricing: !!pricing,
-      hasScheduledPickup: !!scheduledPickupDateTime,
-      orderNumber: orderNumber,
+      userId: authResult.user._id,
+      userEmail: authResult.user.email,
     });
 
-    if (!dryCleaner) throw new ApiError(400, "Dry cleaner ID is required");
-    if (!pickupAddress) throw new ApiError(400, "Pickup address is required");
-    if (!dropoffAddress) throw new ApiError(400, "Dropoff address is required");
-    if (!orderItems) throw new ApiError(400, "Order items are required");
-    if (!pricing) throw new ApiError(400, "Pricing information is required");
-    if (!orderItems || orderItems.length === 0) {
-      throw new ApiError(400, "At least one order item is required");
-    }
-    if (!scheduledPickupDateTime) {
-      throw new ApiError(400, "Scheduled pickup date and time is required");
-    }
-    if (!orderNumber) {
-      throw new ApiError(400, "Order number is required");
+    if (!bookingId || !amount) {
+      throw new ApiError(400, "Booking ID and amount are required");
     }
 
-    // Validate date formats
-    const pickupDate = new Date(scheduledPickupDateTime);
-    if (isNaN(pickupDate.getTime())) {
-      throw new ApiError(400, "Invalid pickup date format");
+    if (amount <= 0) {
+      throw new ApiError(400, "Amount must be greater than 0");
     }
 
-    let deliveryDate = null;
-    if (scheduledDeliveryDateTime) {
-      deliveryDate = new Date(scheduledDeliveryDateTime);
-      if (isNaN(deliveryDate.getTime())) {
-        throw new ApiError(400, "Invalid delivery date format");
-      }
-    }
-
-    // Check if orderNumber is unique
-    const existingBooking = await Booking.findOne({ orderNumber });
-    if (existingBooking) {
-      throw new ApiError(400, `Order number ${orderNumber} already exists`);
-    }
-
-    const trackingId = `TRK-${Date.now()}-${uuidv4().slice(0, 6)}`;
-    
-    console.log('🔍 Creating booking with data:', {
-      userId,
-      dryCleaner,
-      orderNumber,
-      trackingId,
-      itemsCount: orderItems.length,
-      deliveryCharge,
-      totalAmount: pricing.totalAmount,
-    });
-
-    const booking = new Booking({
-      user: userId,
-      dryCleaner,
-      pickupAddress,
-      dropoffAddress,
-      orderItems,
-      pricing,
-      deliveryCharge,
-      distance: distance || 10,
-      time: time || 30,
-      price: pricing.totalAmount,
-      bookingType: "pickup",
-      paymentMethod: paymentMethod || "CREDIT",
-      paymentStatus: "pending",
-      isScheduled: true,
-      scheduledPickupDateTime: pickupDate,
-      scheduledDeliveryDateTime: deliveryDate,
-      message,
-      status: "pending",
-      orderNumber,
-      Tracking_ID: trackingId,
-    });
-
-    const savedBooking = await booking.save();
-
-    const populatedBooking = await Booking.findById(savedBooking._id)
-      .populate("user", "firstName lastName phoneNumber email")
-      .populate("dryCleaner", "shopname address phoneNumber");
-
-    res.status(201).json(
-      new ApiResponse(201, populatedBooking, "Booking created successfully")
-    );
-
-  } catch (error: any) {
-    console.error("❌ Error creating booking:");
-    console.error("Error name:", error.name);
-    console.error("Error message:", error.message);
-    console.error("Error code:", error.code);
-    console.error("Error stack:", error.stack);
-    
-    if (error.errors) {
-      console.error("Validation errors:", error.errors);
-    }
-    
-    if (error.keyPattern) {
-      console.error("Duplicate key pattern:", error.keyPattern);
-    }
-
-    // Re-throw ApiErrors as-is
-    if (error instanceof ApiError) {
-      throw error;
-    }
-    
-    // Handle MongoDB duplicate key error
-    if (error.code === 11000) {
-      throw new ApiError(400, "Duplicate order number or tracking ID");
-    }
-    
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const validationMessages = Object.values(error.errors).map((err: any) => err.message);
-      throw new ApiError(400, `Validation failed: ${validationMessages.join(', ')}`);
-    }
-    
-    throw new ApiError(500, `Failed to create booking: ${error.message}`);
-  }
-});
-
-
-/* ------------------------------------------------------------------ */
-export const createPaymentIntent = asyncHandler(async (req: Request, res: Response) => {
-  // ✅ ADD: Log Stripe key mode at the start
-  console.log('🔑 ============================================');
-  console.log('🔑 STRIPE KEY MODE CHECK:');
-  console.log('🔑 Backend Stripe Key Prefix:', process.env.STRIPE_SECRET_KEY?.substring(0, 10));
-  console.log('🔑 Is Test Mode:', process.env.STRIPE_SECRET_KEY?.startsWith('sk_test_'));
-  console.log('🔑 Is Live Mode:', process.env.STRIPE_SECRET_KEY?.startsWith('sk_live_'));
-  console.log('🔑 ============================================');
-
-  const authResult = await verifyAuthentication(req);
-  if (authResult.userType !== "user") {
-    throw new ApiError(403, "Only users can create payment intents");
-  }
-
-  const { bookingId, amount, currency = "usd", orderNumber } = req.body;
-
-  console.log('💳 Payment Intent Request:', {
-    bookingId,
-    amount,
-    currency,
-    orderNumber,
-    userId: authResult.user._id,
-    userEmail: authResult.user.email,
-  });
-
-  if (!bookingId || !amount) {
-    throw new ApiError(400, "Booking ID and amount are required");
-  }
-
-  if (amount <= 0) {
-    throw new ApiError(400, "Amount must be greater than 0");
-  }
-
-  const booking = await Booking.findOne({
-    _id: bookingId,
-    user: authResult.user._id,
-  });
-
-  if (!booking) {
-    throw new ApiError(404, "Booking not found");
-  }
-
-  console.log('✅ Booking found:', {
-    bookingId: booking._id,
-    orderNumber: booking.orderNumber,
-    currentPaymentStatus: booking.paymentStatus,
-    existingPaymentIntentId: booking.paymentIntentId,
-  });
-
-  if (booking.paymentStatus === "paid" || booking.paymentStatus === "completed") {
-    throw new ApiError(400, "Booking is already paid");
-  }
-
-  // Get or create customer
-  let customer;
-  try {
-    const customers = await stripe.customers.list({
-      email: authResult.user.email,
-      limit: 1,
-    });
-
-    if (customers.data.length > 0) {
-      customer = customers.data[0];
-      console.log('♻️ Found existing Stripe customer:', customer.id);
-    } else {
-      customer = await stripe.customers.create({
-        email: authResult.user.email,
-        name: `${authResult.user.firstName} ${authResult.user.lastName}`,
-        phone: authResult.user.phoneNumber,
-        metadata: {
-          userId: authResult.user._id.toString(),
-        },
-      });
-      console.log('🆕 Created new Stripe customer:', customer.id);
-    }
-  } catch (stripeError: any) {
-    console.error("❌ Error creating/getting Stripe customer:", stripeError);
-    throw new ApiError(500, "Failed to create payment customer");
-  }
-
-  // Create payment intent
-  console.log('💳 Creating payment intent with:', {
-    amount: Math.round(amount),
-    currency,
-    customerId: customer.id,
-  });
-
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: Math.round(amount),
-    currency,
-    customer: customer.id,
-    automatic_payment_methods: { enabled: true },
-    metadata: {
-      bookingId: bookingId.toString(),
-      userId: authResult.user._id.toString(),
-      orderNumber: orderNumber || booking.orderNumber || 'N/A',
-    },
-    description: `Order ${orderNumber || booking.orderNumber} - Dry cleaning service`,
-  });
-
-  // ✅ CORRECT VALIDATION: Check format, not length
-  console.log('🔍 Client Secret Validation:');
-  console.log('   Value:', paymentIntent.client_secret);
-  console.log('   Length:', paymentIntent.client_secret?.length);
-  console.log('   Has _secret_:', paymentIntent.client_secret?.includes('_secret_'));
-  console.log('   Starts with pi_:', paymentIntent.client_secret?.startsWith('pi_'));
-
-  if (!paymentIntent.client_secret) {
-    console.error('❌ Client secret is null or undefined');
-    throw new ApiError(500, "Payment intent missing client_secret");
-  }
-
-  // ✅ FIXED: Only check format, not length
-  if (!paymentIntent.client_secret.includes('_secret_')) {
-    console.error('❌ Client secret does not contain "_secret_"');
-    console.error('Value:', paymentIntent.client_secret);
-    throw new ApiError(500, "Payment intent client_secret is in wrong format");
-  }
-
-  if (!paymentIntent.client_secret.startsWith('pi_')) {
-    console.error('❌ Client secret does not start with "pi_"');
-    console.error('Value:', paymentIntent.client_secret);
-    throw new ApiError(500, "Payment intent client_secret has invalid prefix");
-  }
-
-  // ❌ REMOVE THIS CHECK - It's wrong!
-  // if (paymentIntent.client_secret.length < 100) {
-  //   throw new ApiError(500, "client_secret too short");
-  // }
-
-  console.log('✅ Client secret validation PASSED');
-
-  // Create ephemeral key
-  const ephemeralKey = await stripe.ephemeralKeys.create(
-    { customer: customer.id },
-    { apiVersion: "2024-06-20" }
-  );
-
-  // Update booking
-  await Booking.findByIdAndUpdate(bookingId, {
-    paymentIntentId: paymentIntent.id,
-    paymentStatus: 'pending',
-  });
-
-  // Prepare response
-  const responseData = {
-    paymentIntent: paymentIntent.client_secret,
-    ephemeralKey: ephemeralKey.secret,
-    customerId: customer.id,
-    paymentIntentId: paymentIntent.id,
-  };
-
-  // ✅ FIXED VALIDATION: Only check format
-  console.log('📤 Response Validation:');
-  console.log('   Has Payment Intent:', !!responseData.paymentIntent);
-  console.log('   Format Valid:', responseData.paymentIntent.includes('_secret_'));
-  console.log('   Matches ID:', responseData.paymentIntent.includes(responseData.paymentIntentId));
-
-  if (!responseData.paymentIntent.includes('_secret_')) {
-    console.error('❌ Response validation failed');
-    throw new ApiError(500, "Response validation failed");
-  }
-
-  console.log('✅ All validations passed, sending response');
-
-  res.status(200).json(
-    new ApiResponse(
-      200,
-      responseData,
-      "Payment intent created successfully"
-    )
-  );
-});
-
-
-/* ------------------------------------------------------------------ */
-export const confirmPayment = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req);
-  if (authResult.userType !== "user") {
-    throw new ApiError(403, "Only users can confirm payments");
-  }
-
-  const { bookingId, paymentIntentId } = req.body;
-
-  if (!bookingId || !paymentIntentId) {
-    throw new ApiError(400, "Booking ID and payment intent ID are required");
-  }
-
-  const booking = await Booking.findOne({
-    _id: bookingId,
-    user: authResult.user._id,
-  });
-
-  if (!booking) {
-    throw new ApiError(404, "Booking not found");
-  }
-
-  if (booking.paymentStatus === "paid") {
-    throw new ApiError(400, "Booking payment is already confirmed");
-  }
-
-  const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-
-  if (paymentIntent.status !== "succeeded") {
-    throw new ApiError(400, `Payment not completed. Status: ${paymentIntent.status}`);
-  }
-
-  if (paymentIntent.metadata.bookingId !== bookingId.toString()) {
-    throw new ApiError(400, "Payment intent does not match booking");
-  }
-
-  const updatedBooking = await Booking.findByIdAndUpdate(
-    bookingId,
-    {
-      paymentStatus: "paid",
-      acceptedAt: new Date(),
-      paidAt: new Date(),
-    },
-    { new: true }
-  )
-    .populate("user", "firstName lastName phoneNumber email")
-    .populate("dryCleaner", "shopname address phoneNumber");
-
-  res.status(200).json(
-    new ApiResponse(
-      200,
-      updatedBooking,
-      "Payment confirmed successfully. Your booking is now confirmed!"
-    )
-  );
-});
-
-/* ------------------------------------------------------------------ */
-export const getUserBookings = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req);
-  if (authResult.userType !== "user") throw new ApiError(403, "Only users can view their bookings");
-
-  const { status, page = "1", limit = "10" } = req.query;
-
-  /* ---- now totally type-safe ---- */
-  const currentPage = parseInt(toString(page), 10);
-  const pageSize    = parseInt(toString(limit), 10);
-  const skip        = (currentPage - 1) * pageSize;
-
-  const query: any = { user: authResult.user._id };
-  if (status) query.status = toString(status);
-
-  const bookings = await Booking.find(query)
-    .populate("dryCleaner", "shopname address phoneNumber")
-    .populate("driver", "firstName lastName phoneNumber")
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(pageSize);
-
-  const totalBookings = await Booking.countDocuments(query);
-
-  res.status(200).json(
-    new ApiResponse(200, {
-      bookings,
-      pagination: {
-        currentPage,
-        totalPages: Math.ceil(totalBookings / pageSize),
-        totalBookings,
-        hasNext:  skip + bookings.length < totalBookings,
-        hasPrev:  currentPage > 1,
-      },
-    }, "Bookings retrieved successfully")
-  );
-});
-
-/* ------------------------------------------------------------------ */
-export const getBookingDetails = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req);
-  const { bookingId } = req.params;
-
-  if (!bookingId) {
-    throw new ApiError(400, "Booking ID is required");
-  }
-
-  console.log("=== GET BOOKING DETAILS ===");
-  console.log("BookingId:", bookingId);
-  console.log("Auth UserId:", authResult.user._id);
-  console.log("UserType:", authResult.userType);
-
-  let booking;
-
-  if (authResult.userType === "user") {
-    booking = await Booking.findOne({
+    const booking = await Booking.findOne({
       _id: bookingId,
       user: authResult.user._id,
     });
-    console.log("Searched as USER");
-  }
 
-  else if (authResult.userType === "merchant") {
-    console.log("Searching as MERCHANT");
-
-    // FIX: merchant → owner
-    const dryCleaners = await DryCleaner.find({
-      owner: authResult.user._id
-    }).select("_id");
-
-    const dryCleanerIds = dryCleaners.map(dc => dc._id);
-
-    console.log("Merchant's dry cleaner IDs:", dryCleanerIds);
-
-    if (dryCleanerIds.length === 0) {
-      console.log("No dry cleaners found for merchant");
-      throw new ApiError(404, "No dry cleaners found for this merchant");
+    if (!booking) {
+      throw new ApiError(404, "Booking not found");
     }
 
-    booking = await Booking.findOne({
-      _id: bookingId,
-      dryCleaner: { $in: dryCleanerIds }
+    console.log("✅ Booking found:", {
+      bookingId: booking._id,
+      orderNumber: booking.orderNumber,
+      currentPaymentStatus: booking.paymentStatus,
+      existingPaymentIntentId: booking.paymentIntentId,
     });
 
-    console.log("Booking found:", booking ? "YES" : "NO");
-  }
+    if (
+      booking.paymentStatus === "paid" ||
+      booking.paymentStatus === "completed"
+    ) {
+      throw new ApiError(400, "Booking is already paid");
+    }
 
-  else if (authResult.userType === "driver") {
-    booking = await Booking.findOne({
-      _id: bookingId,
-      driver: authResult.user._id,
+    // Get or create customer
+    let customer;
+    try {
+      const customers = await stripe.customers.list({
+        email: authResult.user.email,
+        limit: 1,
+      });
+
+      if (customers.data.length > 0) {
+        customer = customers.data[0];
+        console.log("♻️ Found existing Stripe customer:", customer.id);
+      } else {
+        customer = await stripe.customers.create({
+          email: authResult.user.email,
+          name: `${authResult.user.firstName} ${authResult.user.lastName}`,
+          phone: authResult.user.phoneNumber,
+          metadata: {
+            userId: authResult.user._id.toString(),
+          },
+        });
+        console.log("🆕 Created new Stripe customer:", customer.id);
+      }
+    } catch (stripeError: any) {
+      console.error("❌ Error creating/getting Stripe customer:", stripeError);
+      throw new ApiError(500, "Failed to create payment customer");
+    }
+
+    // Create payment intent
+    console.log("💳 Creating payment intent with:", {
+      amount: Math.round(amount),
+      currency,
+      customerId: customer.id,
     });
-    console.log("Searched as DRIVER");
-  }
 
-  else {
-    throw new ApiError(403, "Unauthorized access");
-  }
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount),
+      currency,
+      customer: customer.id,
+      automatic_payment_methods: { enabled: true },
+      metadata: {
+        bookingId: bookingId.toString(),
+        userId: authResult.user._id.toString(),
+        orderNumber: orderNumber || booking.orderNumber || "N/A",
+      },
+      description: `Order ${orderNumber || booking.orderNumber} - Dry cleaning service`,
+    });
 
-  if (!booking) {
-    console.log("Booking not found!");
-    throw new ApiError(404, "Booking not found");
-  }
+    // ✅ CORRECT VALIDATION: Check format, not length
+    console.log("🔍 Client Secret Validation:");
+    console.log("   Value:", paymentIntent.client_secret);
+    console.log("   Length:", paymentIntent.client_secret?.length);
+    console.log(
+      "   Has _secret_:",
+      paymentIntent.client_secret?.includes("_secret_"),
+    );
+    console.log(
+      "   Starts with pi_:",
+      paymentIntent.client_secret?.startsWith("pi_"),
+    );
 
-  console.log("Booking found, populating data...");
+    if (!paymentIntent.client_secret) {
+      console.error("❌ Client secret is null or undefined");
+      throw new ApiError(500, "Payment intent missing client_secret");
+    }
 
-  const populatedBooking = await Booking.findById(booking._id)
-    .populate("user", "firstName lastName phoneNumber email")
-    .populate("dryCleaner", "shopname address phoneNumber")
-    .populate("driver", "firstName lastName phoneNumber");
+    // ✅ FIXED: Only check format, not length
+    if (!paymentIntent.client_secret.includes("_secret_")) {
+      console.error('❌ Client secret does not contain "_secret_"');
+      console.error("Value:", paymentIntent.client_secret);
+      throw new ApiError(
+        500,
+        "Payment intent client_secret is in wrong format",
+      );
+    }
 
-  console.log("=== END GET BOOKING DETAILS ===");
+    if (!paymentIntent.client_secret.startsWith("pi_")) {
+      console.error('❌ Client secret does not start with "pi_"');
+      console.error("Value:", paymentIntent.client_secret);
+      throw new ApiError(
+        500,
+        "Payment intent client_secret has invalid prefix",
+      );
+    }
 
-  res.status(200).json(
-    new ApiResponse(200, populatedBooking, "Booking details retrieved successfully")
-  );
-});
+    // ❌ REMOVE THIS CHECK - It's wrong!
+    // if (paymentIntent.client_secret.length < 100) {
+    //   throw new ApiError(500, "client_secret too short");
+    // }
 
+    console.log("✅ Client secret validation PASSED");
 
+    // Create ephemeral key
+    const ephemeralKey = await stripe.ephemeralKeys.create(
+      { customer: customer.id },
+      { apiVersion: "2024-06-20" },
+    );
+
+    // Update booking
+    await Booking.findByIdAndUpdate(bookingId, {
+      paymentIntentId: paymentIntent.id,
+      paymentStatus: "pending",
+    });
+
+    // Prepare response
+    const responseData = {
+      paymentIntent: paymentIntent.client_secret,
+      ephemeralKey: ephemeralKey.secret,
+      customerId: customer.id,
+      paymentIntentId: paymentIntent.id,
+    };
+
+    // ✅ FIXED VALIDATION: Only check format
+    console.log("📤 Response Validation:");
+    console.log("   Has Payment Intent:", !!responseData.paymentIntent);
+    console.log(
+      "   Format Valid:",
+      responseData.paymentIntent.includes("_secret_"),
+    );
+    console.log(
+      "   Matches ID:",
+      responseData.paymentIntent.includes(responseData.paymentIntentId),
+    );
+
+    if (!responseData.paymentIntent.includes("_secret_")) {
+      console.error("❌ Response validation failed");
+      throw new ApiError(500, "Response validation failed");
+    }
+
+    console.log("✅ All validations passed, sending response");
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          responseData,
+          "Payment intent created successfully",
+        ),
+      );
+  },
+);
+
+/* ------------------------------------------------------------------ */
+export const confirmPayment = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+    if (authResult.userType !== "user") {
+      throw new ApiError(403, "Only users can confirm payments");
+    }
+
+    const { bookingId, paymentIntentId } = req.body;
+
+    if (!bookingId || !paymentIntentId) {
+      throw new ApiError(400, "Booking ID and payment intent ID are required");
+    }
+
+    const booking = await Booking.findOne({
+      _id: bookingId,
+      user: authResult.user._id,
+    });
+
+    if (!booking) {
+      throw new ApiError(404, "Booking not found");
+    }
+
+    if (booking.paymentStatus === "paid") {
+      throw new ApiError(400, "Booking payment is already confirmed");
+    }
+
+    const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+    if (paymentIntent.status !== "succeeded") {
+      throw new ApiError(
+        400,
+        `Payment not completed. Status: ${paymentIntent.status}`,
+      );
+    }
+
+    if (paymentIntent.metadata.bookingId !== bookingId.toString()) {
+      throw new ApiError(400, "Payment intent does not match booking");
+    }
+
+    const updatedBooking = await Booking.findByIdAndUpdate(
+      bookingId,
+      {
+        paymentStatus: "paid",
+        acceptedAt: new Date(),
+        paidAt: new Date(),
+      },
+      { new: true },
+    )
+      .populate("user", "firstName lastName phoneNumber email")
+      .populate("dryCleaner", "shopname address phoneNumber");
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          updatedBooking,
+          "Payment confirmed successfully. Your booking is now confirmed!",
+        ),
+      );
+  },
+);
+
+/* ------------------------------------------------------------------ */
+export const getUserBookings = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+    if (authResult.userType !== "user")
+      throw new ApiError(403, "Only users can view their bookings");
+
+    const { status, page = "1", limit = "10" } = req.query;
+
+    /* ---- now totally type-safe ---- */
+    const currentPage = parseInt(toString(page), 10);
+    const pageSize = parseInt(toString(limit), 10);
+    const skip = (currentPage - 1) * pageSize;
+
+    const query: any = { user: authResult.user._id };
+    if (status) query.status = toString(status);
+
+    const bookings = await Booking.find(query)
+      .populate("dryCleaner", "shopname address phoneNumber")
+      .populate("driver", "firstName lastName phoneNumber")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize);
+
+    const totalBookings = await Booking.countDocuments(query);
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          bookings,
+          pagination: {
+            currentPage,
+            totalPages: Math.ceil(totalBookings / pageSize),
+            totalBookings,
+            hasNext: skip + bookings.length < totalBookings,
+            hasPrev: currentPage > 1,
+          },
+        },
+        "Bookings retrieved successfully",
+      ),
+    );
+  },
+);
+
+/* ------------------------------------------------------------------ */
+export const getBookingDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+    const { bookingId } = req.params;
+
+    if (!bookingId) {
+      throw new ApiError(400, "Booking ID is required");
+    }
+
+    console.log("=== GET BOOKING DETAILS ===");
+    console.log("BookingId:", bookingId);
+    console.log("Auth UserId:", authResult.user._id);
+    console.log("UserType:", authResult.userType);
+
+    let booking;
+
+    if (authResult.userType === "user") {
+      booking = await Booking.findOne({
+        _id: bookingId,
+        user: authResult.user._id,
+      });
+      console.log("Searched as USER");
+    } else if (authResult.userType === "merchant") {
+      console.log("Searching as MERCHANT");
+
+      // FIX: merchant → owner
+      const dryCleaners = await DryCleaner.find({
+        owner: authResult.user._id,
+      }).select("_id");
+
+      const dryCleanerIds = dryCleaners.map((dc) => dc._id);
+
+      console.log("Merchant's dry cleaner IDs:", dryCleanerIds);
+
+      if (dryCleanerIds.length === 0) {
+        console.log("No dry cleaners found for merchant");
+        throw new ApiError(404, "No dry cleaners found for this merchant");
+      }
+
+      booking = await Booking.findOne({
+        _id: bookingId,
+        dryCleaner: { $in: dryCleanerIds },
+      });
+
+      console.log("Booking found:", booking ? "YES" : "NO");
+    } else if (authResult.userType === "driver") {
+      booking = await Booking.findOne({
+        _id: bookingId,
+        driver: authResult.user._id,
+      });
+      console.log("Searched as DRIVER");
+    } else {
+      throw new ApiError(403, "Unauthorized access");
+    }
+
+    if (!booking) {
+      console.log("Booking not found!");
+      throw new ApiError(404, "Booking not found");
+    }
+
+    console.log("Booking found, populating data...");
+
+    const populatedBooking = await Booking.findById(booking._id)
+      .populate("user", "firstName lastName phoneNumber email")
+      .populate("dryCleaner", "shopname address phoneNumber")
+      .populate("driver", "firstName lastName phoneNumber");
+
+    console.log("=== END GET BOOKING DETAILS ===");
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          populatedBooking,
+          "Booking details retrieved successfully",
+        ),
+      );
+  },
+);
 
 /* ------------------------------------------------------------------ */
 // export const cancelBooking = asyncHandler(async (req: Request, res: Response) => {
@@ -1715,236 +1766,303 @@ export const getBookingDetails = asyncHandler(async (req: Request, res: Response
 //   );
 // });
 
+export const getOrderReceipt = asyncHandler(
+  async (req: Request, res: Response) => {
+    // FIX 1: Use orderId from params, not bookingId
+    const { orderId } = req.params;
 
-export const getOrderReceipt = asyncHandler(async (req: Request, res: Response) => {
-  // FIX 1: Use orderId from params, not bookingId
-  const { orderId } = req.params;
-  
-  // FIX 2: Use the correct field for querying
-  // Based on your booking creation, you should query by orderNumber or _id
-  let booking;
-  
-  // Try to find by MongoDB ObjectId first
-  if (orderId.match(/^[0-9a-fA-F]{24}$/)) {
-    booking = await Booking.findById(orderId)
-      .populate("dryCleaner", "shopname address phoneNumber")
-      .populate("user", "firstName lastName email")
-      .lean();
-  }
-  
-  // If not found by ID, try by orderNumber (like #OC3913 or DCS937576722)
-  if (!booking) {
-    const orderNumber = orderId.startsWith('#') ? orderId.substring(1) : orderId;
-    booking = await Booking.findOne({ 
-      $or: [
-        { orderNumber: orderNumber },
-        { orderNumber: `#${orderNumber}` }
-      ]
-    })
-      .populate("dryCleaner", "shopname address phoneNumber")
-      .populate("user", "firstName lastName email")
-      .lean();
-  }
+    // FIX 2: Use the correct field for querying
+    // Based on your booking creation, you should query by orderNumber or _id
+    let booking;
 
-  if (!booking) {
-    throw new ApiError(404, "Booking not found");
-  }
+    // Try to find by MongoDB ObjectId first
+    if (orderId.match(/^[0-9a-fA-F]{24}$/)) {
+      booking = await Booking.findById(orderId)
+        .populate("dryCleaner", "shopname address phoneNumber")
+        .populate("user", "firstName lastName email")
+        .lean();
+    }
 
-  // FIX 3: Map the data structure correctly to match frontend expectations
-  const receipt = {
-    orderId: `#${booking.orderNumber}`, // Frontend expects #OC3913 format
-    trackingId: (booking as any).trackingId || (booking as any).Tracking_ID || 'N/A', // Handle any field name variations
-    totalAmount: `${booking.pricing.totalAmount.toFixed(2)}`, // Format as currency
-    paymentMessage: `We wish to inform you that $${booking.pricing.totalAmount} has been debited from your ${booking.paymentMethod || 'Debit'} Card ending with 1234 on ${new Date(booking.paidAt || booking.createdAt).toLocaleString('en-US', { 
-      month: '2-digit', 
-      day: '2-digit', 
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false 
-    }).replace(',', '')}`,
-    items: booking.orderItems.map((item: any) => ({
-      qty: item.quantity,
-      price: `$${item.price.toFixed(2)}`,
-      name: item.name,
-      subtext: item.washOnly ? 'Wash Only' : (item.options?.washAndFold ? 'Wash & Fold' : '')
-    })),
-    dryCleanerName: (booking.dryCleaner as any)?.shopname,
-    dryCleanerAddress: (booking.dryCleaner as any)?.address,
-    unclaimedItems: [
-      { description: "Cost for making 30 consecutive storage", price: "$5.00" },
-      { description: "Cost for overnight storage", price: "$20.00/Night" },
-      { description: "Cost for donating", price: "$10.00" }
-    ]
-  };
-
-  res.status(200).json(new ApiResponse(200, receipt, "Receipt fetched successfully"));
-});
-
-
-export const updatePickupAddress = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-  const { bookingId } = req.params;
-  const { pickupAddress } = req.body;
-  
-  // Access user from your authUser structure
-  const authUser = req.authUser;
-  
-  if (!authUser) {
-    res.status(401).json(new ApiResponse(401, null, "Unauthorized"));
-    return;
-  }
-
-  // Only allow 'user' type to update pickup address
-  if (authUser.userType !== 'user') {
-    res.status(403).json(new ApiResponse(403, null, "Access denied - Only users can update pickup address"));
-    return;
-  }
-
-  if (!pickupAddress) {
-    res.status(400).json(new ApiResponse(400, null, "pickupAddress is required"));
-    return;
-  }
-
-  const userId = authUser.user._id;
-  console.log('updatePickupAddress - userId:', userId, 'bookingId:', bookingId);
-
-  try {
-    // Find booking and ensure it belongs to the authenticated user
-    const booking = await Booking.findOne({ 
-      _id: bookingId, 
-      user: userId 
-    });
-    
+    // If not found by ID, try by orderNumber (like #OC3913 or DCS937576722)
     if (!booking) {
-      res.status(404).json(new ApiResponse(404, null, "Booking not found or access denied"));
+      const orderNumber = orderId.startsWith("#")
+        ? orderId.substring(1)
+        : orderId;
+      booking = await Booking.findOne({
+        $or: [{ orderNumber: orderNumber }, { orderNumber: `#${orderNumber}` }],
+      })
+        .populate("dryCleaner", "shopname address phoneNumber")
+        .populate("user", "firstName lastName email")
+        .lean();
+    }
+
+    if (!booking) {
+      throw new ApiError(404, "Booking not found");
+    }
+
+    // FIX 3: Map the data structure correctly to match frontend expectations
+    const receipt = {
+      orderId: `#${booking.orderNumber}`, // Frontend expects #OC3913 format
+      trackingId:
+        (booking as any).trackingId || (booking as any).Tracking_ID || "N/A", // Handle any field name variations
+      totalAmount: `${booking.pricing.totalAmount.toFixed(2)}`, // Format as currency
+      paymentMessage: `We wish to inform you that $${booking.pricing.totalAmount} has been debited from your ${booking.paymentMethod || "Debit"} Card ending with 1234 on ${new Date(
+        booking.paidAt || booking.createdAt,
+      )
+        .toLocaleString("en-US", {
+          month: "2-digit",
+          day: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false,
+        })
+        .replace(",", "")}`,
+      items: booking.orderItems.map((item: any) => ({
+        qty: item.quantity,
+        price: `$${item.price.toFixed(2)}`,
+        name: item.name,
+        subtext: item.washOnly
+          ? "Wash Only"
+          : item.options?.washAndFold
+            ? "Wash & Fold"
+            : "",
+      })),
+      dryCleanerName: (booking.dryCleaner as any)?.shopname,
+      dryCleanerAddress: (booking.dryCleaner as any)?.address,
+      unclaimedItems: [
+        {
+          description: "Cost for making 30 consecutive storage",
+          price: "$5.00",
+        },
+        { description: "Cost for overnight storage", price: "$20.00/Night" },
+        { description: "Cost for donating", price: "$10.00" },
+      ],
+    };
+
+    res
+      .status(200)
+      .json(new ApiResponse(200, receipt, "Receipt fetched successfully"));
+  },
+);
+
+export const updatePickupAddress = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const { bookingId } = req.params;
+    const { pickupAddress } = req.body;
+
+    // Access user from your authUser structure
+    const authUser = req.authUser;
+
+    if (!authUser) {
+      res.status(401).json(new ApiResponse(401, null, "Unauthorized"));
       return;
     }
 
-    if (!booking.createdAt) {
-      res.status(400).json(new ApiResponse(400, null, "Booking creation time not available"));
+    // Only allow 'user' type to update pickup address
+    if (authUser.userType !== "user") {
+      res
+        .status(403)
+        .json(
+          new ApiResponse(
+            403,
+            null,
+            "Access denied - Only users can update pickup address",
+          ),
+        );
       return;
     }
 
-    // Check if within 2 hours of booking creation
-    const now = new Date();
-    const allowedUntil = new Date(booking.createdAt.getTime() + 2 * 60 * 60 * 1000);
-
-    if (now > allowedUntil) {
-      res.status(400).json(new ApiResponse(
-        400, 
-        null, 
-        "Pickup address can only be updated within 2 hours of booking creation"
-      ));
+    if (!pickupAddress) {
+      res
+        .status(400)
+        .json(new ApiResponse(400, null, "pickupAddress is required"));
       return;
     }
 
-    // Update the pickup address
-    booking.pickupAddress = pickupAddress;
-    await booking.save();
+    const userId = authUser.user._id;
+    console.log(
+      "updatePickupAddress - userId:",
+      userId,
+      "bookingId:",
+      bookingId,
+    );
 
-    console.log('updatePickupAddress - Successfully updated for booking:', bookingId);
+    try {
+      // Find booking and ensure it belongs to the authenticated user
+      const booking = await Booking.findOne({
+        _id: bookingId,
+        user: userId,
+      });
 
-    res.status(200).json(new ApiResponse(200, booking, "Pickup address updated successfully"));
-    
-  } catch (error) {
-    console.error('updatePickupAddress - Error:', error);
-    res.status(500).json(new ApiResponse(500, null, "Failed to update pickup address"));
-  }
-});
+      if (!booking) {
+        res
+          .status(404)
+          .json(
+            new ApiResponse(404, null, "Booking not found or access denied"),
+          );
+        return;
+      }
 
+      if (!booking.createdAt) {
+        res
+          .status(400)
+          .json(
+            new ApiResponse(400, null, "Booking creation time not available"),
+          );
+        return;
+      }
 
-export const userBokinghistory = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-  // Access user from your authUser structure
-  const authUser = req.authUser;
-  
+      // Check if within 2 hours of booking creation
+      const now = new Date();
+      const allowedUntil = new Date(
+        booking.createdAt.getTime() + 2 * 60 * 60 * 1000,
+      );
 
-  if (!authUser) {
-    res.status(401).json(new ApiResponse(401, null, "Unauthorized - No auth user found"));
-    return;
-  }
+      if (now > allowedUntil) {
+        res
+          .status(400)
+          .json(
+            new ApiResponse(
+              400,
+              null,
+              "Pickup address can only be updated within 2 hours of booking creation",
+            ),
+          );
+        return;
+      }
 
-  // Only allow 'user' type to access booking history
-  if (authUser.userType !== 'user') {
-    res.status(403).json(new ApiResponse(403, null, "Access denied - Only users can view booking history"));
-    return;
-  }
+      // Update the pickup address
+      booking.pickupAddress = pickupAddress;
+      await booking.save();
 
-  const userId = authUser.user._id;
+      console.log(
+        "updatePickupAddress - Successfully updated for booking:",
+        bookingId,
+      );
 
-  try {
-    // Convert userId to ObjectId for MongoDB query
-    const userObjectId = new mongoose.Types.ObjectId(userId);
-    
-    const bookings = await Booking.find({ user: userObjectId })
-      .populate("dryCleaner", "shopname email phoneNumber address")
-      .populate("user", "firstName lastName email")
-      .sort({ createdAt: -1 })
-      .lean();
+      res
+        .status(200)
+        .json(
+          new ApiResponse(200, booking, "Pickup address updated successfully"),
+        );
+    } catch (error) {
+      console.error("updatePickupAddress - Error:", error);
+      res
+        .status(500)
+        .json(new ApiResponse(500, null, "Failed to update pickup address"));
+    }
+  },
+);
 
-    
-    if (bookings.length === 0) {
-      console.log('userBokinghistory - No bookings found for user:', userId);
-      res.status(200).json(new ApiResponse(200, [], "No bookings found"));
+export const userBokinghistory = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    // Access user from your authUser structure
+    const authUser = req.authUser;
+
+    if (!authUser) {
+      res
+        .status(401)
+        .json(new ApiResponse(401, null, "Unauthorized - No auth user found"));
       return;
     }
 
-    
-
-    res.status(200).json(new ApiResponse(200, bookings, "User bookings fetched successfully"));
-    
-  } catch (error) {
-    console.error('userBokinghistory - Database error:', error);
-    
-    if (error instanceof mongoose.Error.CastError) {
-      res.status(400).json(new ApiResponse(400, null, "Invalid user ID format"));
-    } else {
-      res.status(500).json(new ApiResponse(500, null, "Failed to fetch bookings"));
+    // Only allow 'user' type to access booking history
+    if (authUser.userType !== "user") {
+      res
+        .status(403)
+        .json(
+          new ApiResponse(
+            403,
+            null,
+            "Access denied - Only users can view booking history",
+          ),
+        );
+      return;
     }
-  }
-});
 
+    const userId = authUser.user._id;
 
-export const generateBookingQRCode = asyncHandler(async (req: Request, res: Response): Promise<void> => {
-  const bookingId = req.params.id;
+    try {
+      // Convert userId to ObjectId for MongoDB query
+      const userObjectId = new mongoose.Types.ObjectId(userId);
 
-  if (!mongoose.Types.ObjectId.isValid(bookingId)) {
-    res.status(400).json(new ApiResponse(400, null, "Invalid booking ID"));
-    return;
-  }
+      const bookings = await Booking.find({ user: userObjectId })
+        .populate("dryCleaner", "shopname email phoneNumber address")
+        .populate("user", "firstName lastName email")
+        .sort({ createdAt: -1 })
+        .lean();
 
-  const booking = await Booking.findById(bookingId)
-    .populate("user", "firstName lastName email");
+      if (bookings.length === 0) {
+        console.log("userBokinghistory - No bookings found for user:", userId);
+        res.status(200).json(new ApiResponse(200, [], "No bookings found"));
+        return;
+      }
 
-  if (!booking) {
-    res.status(404).json(new ApiResponse(404, null, "Booking not found"));
-    return;
-  }
+      res
+        .status(200)
+        .json(
+          new ApiResponse(200, bookings, "User bookings fetched successfully"),
+        );
+    } catch (error) {
+      console.error("userBokinghistory - Database error:", error);
 
-  const qrData = {
-    bookingId: (booking._id as mongoose.Types.ObjectId).toString(),
-    user: booking.user,
-    dryCleaner: booking.dryCleaner,
-    status: booking.status,
-    totalAmount: booking.pricing?.totalAmount,
-    pickupAddress: booking.pickupAddress,
-    dropoffAddress: booking.dropoffAddress,
-  };
+      if (error instanceof mongoose.Error.CastError) {
+        res
+          .status(400)
+          .json(new ApiResponse(400, null, "Invalid user ID format"));
+      } else {
+        res
+          .status(500)
+          .json(new ApiResponse(500, null, "Failed to fetch bookings"));
+      }
+    }
+  },
+);
 
-  const qrCodeImage = await QRCode.toDataURL(JSON.stringify(qrData));
+export const generateBookingQRCode = asyncHandler(
+  async (req: Request, res: Response): Promise<void> => {
+    const bookingId = req.params.id;
 
-  res.status(200).json(
-    new ApiResponse(200, { booking, qrCode: qrCodeImage }, "QR code generated successfully")
-  );
-});
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      res.status(400).json(new ApiResponse(400, null, "Invalid booking ID"));
+      return;
+    }
 
+    const booking = await Booking.findById(bookingId).populate(
+      "user",
+      "firstName lastName email",
+    );
 
+    if (!booking) {
+      res.status(404).json(new ApiResponse(404, null, "Booking not found"));
+      return;
+    }
 
+    const qrData = {
+      bookingId: (booking._id as mongoose.Types.ObjectId).toString(),
+      user: booking.user,
+      dryCleaner: booking.dryCleaner,
+      status: booking.status,
+      totalAmount: booking.pricing?.totalAmount,
+      pickupAddress: booking.pickupAddress,
+      dropoffAddress: booking.dropoffAddress,
+    };
 
+    const qrCodeImage = await QRCode.toDataURL(JSON.stringify(qrData));
 
-
-
-
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { booking, qrCode: qrCodeImage },
+          "QR code generated successfully",
+        ),
+      );
+  },
+);
 
 // ================================================================
 // notification
@@ -1994,164 +2112,193 @@ interface AuthResult {
   userType: string;
 }
 
-type NotificationType = 
-  | 'booking_accepted' 
-  | 'booking_rejected' 
-  | 'driver_update' 
-  | 'payment' 
-  | 'general';
+type NotificationType =
+  | "booking_accepted"
+  | "booking_rejected"
+  | "driver_update"
+  | "payment"
+  | "general";
 
 // Helper function to safely parse query parameters
 const parseQueryParam = (param: any, defaultValue: number): number => {
-  if (typeof param === 'string') {
+  if (typeof param === "string") {
     const parsed = parseInt(param, 10);
     return isNaN(parsed) ? defaultValue : parsed;
   }
-  if (typeof param === 'number') {
+  if (typeof param === "number") {
     return param;
   }
   return defaultValue;
 };
 
 const parseQueryBoolean = (param: any, defaultValue: boolean): boolean => {
-  if (typeof param === 'string') {
-    return param === 'true';
+  if (typeof param === "string") {
+    return param === "true";
   }
-  if (typeof param === 'boolean') {
+  if (typeof param === "boolean") {
     return param;
   }
   return defaultValue;
 };
 
-export const getUserNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  const userId = authResult.user._id;
-  
-  const { limit, offset, unreadOnly } = req.query;
+export const getUserNotifications = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+    const userId = authResult.user._id;
 
-  const result = await NotificationService.getUserNotifications(userId.toString(), {
-    limit: parseQueryParam(limit, 50),
-    offset: parseQueryParam(offset, 0),
-    unreadOnly: parseQueryBoolean(unreadOnly, false)
-  });
+    const { limit, offset, unreadOnly } = req.query;
 
-  res.status(200).json(
-    new ApiResponse(200, result, 'Notifications retrieved successfully')
-  );
-});
+    const result = await NotificationService.getUserNotifications(
+      userId.toString(),
+      {
+        limit: parseQueryParam(limit, 50),
+        offset: parseQueryParam(offset, 0),
+        unreadOnly: parseQueryBoolean(unreadOnly, false),
+      },
+    );
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, result, "Notifications retrieved successfully"),
+      );
+  },
+);
 
 /**
  * Mark notification as read
  */
-export const markNotificationAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  const userId = authResult.user._id;
-  const { notificationId } = req.params;
+export const markNotificationAsRead = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+    const userId = authResult.user._id;
+    const { notificationId } = req.params;
 
-  if (!notificationId || !mongoose.Types.ObjectId.isValid(notificationId)) {
-    throw new ApiError(400, 'Invalid notification ID format');
-  }
+    if (!notificationId || !mongoose.Types.ObjectId.isValid(notificationId)) {
+      throw new ApiError(400, "Invalid notification ID format");
+    }
 
-  const notification = await NotificationService.markAsRead(notificationId, userId.toString());
+    const notification = await NotificationService.markAsRead(
+      notificationId,
+      userId.toString(),
+    );
 
-  res.status(200).json(
-    new ApiResponse(200, notification, 'Notification marked as read')
-  );
-});
+    res
+      .status(200)
+      .json(new ApiResponse(200, notification, "Notification marked as read"));
+  },
+);
 
 /**
  * Mark all notifications as read
  */
-export const markAllNotificationsAsRead = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  const userId = authResult.user._id;
+export const markAllNotificationsAsRead = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+    const userId = authResult.user._id;
 
-  const result = await NotificationService.markAllAsRead(userId.toString());
+    const result = await NotificationService.markAllAsRead(userId.toString());
 
-  res.status(200).json(
-    new ApiResponse(200, result, 'All notifications marked as read')
-  );
-});
+    res
+      .status(200)
+      .json(new ApiResponse(200, result, "All notifications marked as read"));
+  },
+);
 
 /**
  * Delete notification
  */
-export const deleteAllNotifications = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  const userId = authResult.user._id;
+export const deleteAllNotifications = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+    const userId = authResult.user._id;
 
-  // Call your service method to delete all notifications for this user
-  await NotificationService.deleteAllNotifications(userId.toString());
+    // Call your service method to delete all notifications for this user
+    await NotificationService.deleteAllNotifications(userId.toString());
 
-  res.status(200).json(
-    new ApiResponse(200, null, 'All notifications deleted successfully')
-  );
-});
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, null, "All notifications deleted successfully"),
+      );
+  },
+);
 
 /**
  * Send test notification (for development)
  */
-export const sendTestNotification = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  const userId = authResult.user._id;
-  
-  const { type = 'general', title, message } = req.body;
+export const sendTestNotification = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+    const userId = authResult.user._id;
 
-  const notification = await NotificationService.createNotification({
-    userId: userId.toString(),
-    title: title || 'Test Notification',
-    message: message || 'This is a test notification.',
-    type: type as NotificationType,
-    priority: 'normal'
-  });
+    const { type = "general", title, message } = req.body;
 
-  res.status(200).json(
-    new ApiResponse(200, notification, 'Test notification sent successfully')
-  );
-});
+    const notification = await NotificationService.createNotification({
+      userId: userId.toString(),
+      title: title || "Test Notification",
+      message: message || "This is a test notification.",
+      type: type as NotificationType,
+      priority: "normal",
+    });
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          notification,
+          "Test notification sent successfully",
+        ),
+      );
+  },
+);
 
 // Simple booking response handler - rejection makes booking available to other drivers
 export const respondToBookingRequest = asyncHandler(
   async (req: Request, res: Response) => {
-    const authResult = await verifyAuthentication(req) as AuthResult;
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
     if (authResult.userType !== "driver") {
       throw new ApiError(403, "Only drivers can respond to booking requests");
     }
-   
+
     const driverId = authResult.user._id;
-    const driverName = authResult.user.name || 'Driver';
-    const { bookingId, response = 'accept', rejectionReason } = req.body;
-   
+    const driverName = authResult.user.name || "Driver";
+    const { bookingId, response = "accept", rejectionReason } = req.body;
+
     if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
       throw new ApiError(400, "Invalid booking ID format");
     }
 
-    if (!['accept', 'reject'].includes(response)) {
+    if (!["accept", "reject"].includes(response)) {
       throw new ApiError(400, "Response must be 'accept' or 'reject'");
     }
 
     try {
       let updatedBooking: PopulatedBooking | null;
 
-      if (response === 'accept') {
+      if (response === "accept") {
         // Accept the booking
-        updatedBooking = await Booking.findOneAndUpdate(
+        updatedBooking = (await Booking.findOneAndUpdate(
           {
             _id: bookingId,
-            status: "pending"
+            status: "pending",
           },
           {
             driver: driverId,
             status: "accepted",
-            acceptedAt: new Date()
+            acceptedAt: new Date(),
           },
           {
-            new: true
-          }
-        ).populate('user', 'name email') as unknown as PopulatedBooking | null;
+            new: true,
+          },
+        ).populate("user", "name email")) as unknown as PopulatedBooking | null;
 
         if (!updatedBooking) {
-          throw new ApiError(404, "Pending booking request not found or already processed");
+          throw new ApiError(
+            404,
+            "Pending booking request not found or already processed",
+          );
         }
 
         // Send acceptance notification to customer
@@ -2160,11 +2307,17 @@ export const respondToBookingRequest = asyncHandler(
             await NotificationService.sendBookingAcceptedNotification(
               updatedBooking.user._id.toString(),
               bookingId,
-              driverName
+              driverName,
             );
-            console.log('Acceptance notification sent to customer:', updatedBooking.user._id);
+            console.log(
+              "Acceptance notification sent to customer:",
+              updatedBooking.user._id,
+            );
           } catch (notificationError) {
-            console.error('Failed to send acceptance notification:', notificationError);
+            console.error(
+              "Failed to send acceptance notification:",
+              notificationError,
+            );
           }
         }
 
@@ -2175,22 +2328,27 @@ export const respondToBookingRequest = asyncHandler(
               bookingId: bookingId,
               status: "accepted",
               driverId: driverId,
-              acceptedAt: updatedBooking.acceptedAt
+              acceptedAt: updatedBooking.acceptedAt,
             },
-            "Booking request accepted successfully. Customer has been notified."
-          )
+            "Booking request accepted successfully. Customer has been notified.",
+          ),
         );
-
-      } else if (response === 'reject') {
+      } else if (response === "reject") {
         // Simply keep the booking as "pending" so other drivers can pick it up
-        const booking = await Booking.findById(bookingId).populate('user', 'name email') as unknown as PopulatedBooking | null;
+        const booking = (await Booking.findById(bookingId).populate(
+          "user",
+          "name email",
+        )) as unknown as PopulatedBooking | null;
 
         if (!booking) {
           throw new ApiError(404, "Booking not found");
         }
 
         if (booking.status !== "pending") {
-          throw new ApiError(400, "Booking is no longer available for rejection");
+          throw new ApiError(
+            400,
+            "Booking is no longer available for rejection",
+          );
         }
 
         // Send rejection notification to customer (but keep booking pending for others)
@@ -2199,11 +2357,17 @@ export const respondToBookingRequest = asyncHandler(
             await NotificationService.sendBookingRejectedNotification(
               booking.user._id.toString(),
               bookingId,
-              `${driverName} declined your request, but other drivers can still accept it.`
+              `${driverName} declined your request, but other drivers can still accept it.`,
             );
-            console.log('Rejection notification sent to customer:', booking.user._id);
+            console.log(
+              "Rejection notification sent to customer:",
+              booking.user._id,
+            );
           } catch (notificationError) {
-            console.error('Failed to send rejection notification:', notificationError);
+            console.error(
+              "Failed to send rejection notification:",
+              notificationError,
+            );
           }
         }
 
@@ -2216,50 +2380,55 @@ export const respondToBookingRequest = asyncHandler(
             {
               bookingId: bookingId,
               status: "pending", // Status remains pending for other drivers
-              message: "Booking rejected but remains available for other drivers"
+              message:
+                "Booking rejected but remains available for other drivers",
             },
-            "Booking request rejected. The booking remains available for other drivers."
-          )
+            "Booking request rejected. The booking remains available for other drivers.",
+          ),
         );
       }
-
     } catch (error) {
       console.error("Booking response error:", error);
-     
+
       if (error instanceof ApiError) {
         throw error;
       }
-     
+
       throw new ApiError(
         500,
-        `Failed to respond to booking: ${(error as Error)?.message || "Unknown error"}`
+        `Failed to respond to booking: ${(error as Error)?.message || "Unknown error"}`,
       );
     }
-  }
+  },
 );
 
 // Fixed function to notify other available drivers
-const notifyOtherAvailableDrivers = async (booking: PopulatedBooking, excludeDriverId: string) => {
+const notifyOtherAvailableDrivers = async (
+  booking: PopulatedBooking,
+  excludeDriverId: string,
+) => {
   try {
     // Find all active drivers except the one who just rejected
     const availableDrivers = await User.find({
-      userType: 'driver',
+      userType: "driver",
       isActive: true,
       isAvailable: true,
-      _id: { $ne: excludeDriverId } // Exclude the driver who just rejected
+      _id: { $ne: excludeDriverId }, // Exclude the driver who just rejected
     });
 
-    console.log(`Found ${availableDrivers.length} other available drivers for booking ${booking._id}`);
+    console.log(
+      `Found ${availableDrivers.length} other available drivers for booking ${booking._id}`,
+    );
 
     // Send notifications to available drivers
     const notificationPromises = availableDrivers.map(async (driver: any) => {
       try {
         await NotificationService.createNotification({
           userId: driver._id.toString(),
-          title: 'Booking Available',
-          message: `A dry cleaning pickup is available: ${booking.pickup || 'Location'} - ${booking.deliveryCharge || '22.30'}`,
-          type: 'general' as NotificationType, // Changed from 'booking_available' to 'general'
-          priority: 'high',
+          title: "Booking Available",
+          message: `A dry cleaning pickup is available: ${booking.pickup || "Location"} - ${booking.deliveryCharge || "22.30"}`,
+          type: "general" as NotificationType, // Changed from 'booking_available' to 'general'
+          priority: "high",
           data: {
             bookingId: booking._id.toString(),
             pickup: booking.pickup,
@@ -2267,28 +2436,29 @@ const notifyOtherAvailableDrivers = async (booking: PopulatedBooking, excludeDri
             deliveryCharge: booking.deliveryCharge,
             miles: booking.miles,
             time: booking.time,
-            customerName: booking.user?.name
-          }
+            customerName: booking.user?.name,
+          },
         });
 
-        console.log(`Notification sent to driver ${driver._id} for booking ${booking._id}`);
+        console.log(
+          `Notification sent to driver ${driver._id} for booking ${booking._id}`,
+        );
       } catch (error) {
         console.error(`Failed to notify driver ${driver._id}:`, error);
       }
     });
 
     await Promise.all(notificationPromises);
-    
+
     return {
       success: true,
-      notifiedDrivers: availableDrivers.length
+      notifiedDrivers: availableDrivers.length,
     };
-
   } catch (error) {
-    console.error('Error notifying other available drivers:', error);
+    console.error("Error notifying other available drivers:", error);
     return {
       success: false,
-      error: (error as Error).message
+      error: (error as Error).message,
     };
   }
 };
@@ -2299,202 +2469,241 @@ const notifyOtherAvailableDrivers = async (booking: PopulatedBooking, excludeDri
  */
 // Update the backend controller to support 'dropped_at_center' status
 
-export const updateBookingStatus = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  const userId = authResult.user._id;
-  const userType = authResult.userType;
-  
-  const { 
-    bookingId, 
-    status, 
-    driverId, 
-    startedAt,
-    completedAt,
-    pickupCompletedAt,
-    dropoffCompletedAt,
-    driverName,
-    location,
-    notes,
-    routeDistance,
-    routeDuration
-  } = req.body;
+export const updateBookingStatus = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+    const userId = authResult.user._id;
+    const userType = authResult.userType;
 
-  // Validate required fields
-  if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
-    throw new ApiError(400, 'Invalid booking ID format');
-  }
-
-  if (!status) {
-    throw new ApiError(400, 'Status is required');
-  }
-
-  // Valid status transitions - ADD 'dropped_at_center'
-  const validStatuses = [
-    'pending',
-    'accepted', 
-    'in_progress',
-    'pickup_completed',
-    'en_route_to_dropoff',
-    'arrived_at_dropoff',
-    'dropped_at_center', // NEW STATUS
-    'completed',
-    'cancelled',
-    'rejected'
-  ];
-
-  if (!validStatuses.includes(status)) {
-    throw new ApiError(400, `Invalid status. Must be one of: ${validStatuses.join(', ')}`);
-  }
-
-  try {
-    const existingBooking = await Booking.findById(bookingId).populate('user', 'name email');
-
-    if (!existingBooking) {
-      throw new ApiError(404, 'Booking not found');
-    }
-
-    // Authorization checks
-    if (userType === 'driver') {
-      if (existingBooking.driver && existingBooking.driver.toString() !== userId.toString()) {
-        throw new ApiError(403, 'You can only update your own bookings');
-      }
-    } else if (userType === 'customer') {
-      if (existingBooking.user?._id.toString() !== userId.toString()) {
-        throw new ApiError(403, 'You can only update your own bookings');
-      }
-    } else {
-      throw new ApiError(403, 'Only drivers and customers can update booking status');
-    }
-
-    // Validate status transitions - UPDATE to include dropped_at_center
-    const currentStatus = existingBooking.status;
-    const validTransitions: Record<string, string[]> = {
-      'pending': ['accepted', 'rejected', 'cancelled'],
-      'accepted': ['in_progress', 'cancelled'],
-      'in_progress': ['pickup_completed', 'cancelled'],
-      'pickup_completed': ['en_route_to_dropoff', 'cancelled'],
-      'en_route_to_dropoff': ['arrived_at_dropoff', 'cancelled'],
-      'arrived_at_dropoff': ['dropped_at_center', 'cancelled'], // UPDATED
-      'dropped_at_center': ['completed', 'cancelled'], // NEW
-      'completed': [],
-      'cancelled': [],
-      'rejected': []
-    };
-
-    if (!validTransitions[currentStatus]?.includes(status)) {
-      throw new ApiError(400, `Invalid status transition from ${currentStatus} to ${status}`);
-    }
-
-    // Prepare update object
-    const updateData: any = {
-      status,
-      updatedAt: new Date()
-    };
-
-    // Add timestamp fields based on status
-    switch (status) {
-      case 'accepted':
-        if (driverId) {
-          updateData.driver = driverId;
-          updateData.acceptedAt = new Date();
-        }
-        break;
-      case 'in_progress':
-        if (driverId) {
-          updateData.driver = driverId;
-        }
-        updateData.startedAt = startedAt ? new Date(startedAt) : new Date();
-        break;
-      case 'pickup_completed':
-        updateData.pickupCompletedAt = pickupCompletedAt ? new Date(pickupCompletedAt) : new Date();
-        break;
-      case 'dropped_at_center': // NEW CASE
-        updateData.dropoffCompletedAt = dropoffCompletedAt ? new Date(dropoffCompletedAt) : new Date();
-        if (routeDistance) {
-          updateData.routeDistance = routeDistance;
-        }
-        if (routeDuration) {
-          updateData.routeDuration = routeDuration;
-        }
-        break;
-      case 'completed':
-        updateData.completedAt = completedAt ? new Date(completedAt) : new Date();
-        if (!updateData.dropoffCompletedAt) {
-          updateData.dropoffCompletedAt = dropoffCompletedAt ? new Date(dropoffCompletedAt) : new Date();
-        }
-        break;
-      case 'cancelled':
-        updateData.cancelledAt = new Date();
-        if (notes) {
-          updateData.cancellationReason = notes;
-        }
-        break;
-    }
-
-    // Add optional fields
-    if (location) {
-      updateData.currentLocation = location;
-    }
-    if (notes) {
-      updateData.statusNotes = notes;
-    }
-
-    // Update the booking
-    const updatedBooking = await Booking.findByIdAndUpdate(
+    const {
       bookingId,
-      updateData,
-      { new: true }
-    ).populate('user', 'name email') as unknown as PopulatedBooking;
+      status,
+      driverId,
+      startedAt,
+      completedAt,
+      pickupCompletedAt,
+      dropoffCompletedAt,
+      driverName,
+      location,
+      notes,
+      routeDistance,
+      routeDuration,
+    } = req.body;
 
-    if (!updatedBooking) {
-      throw new ApiError(404, 'Failed to update booking');
+    // Validate required fields
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      throw new ApiError(400, "Invalid booking ID format");
     }
 
-    // Send notifications
-    if (updatedBooking.user) {
-      try {
-        await sendStatusChangeNotification(
-          updatedBooking.user._id,
-          bookingId,
-          status,
-          driverName || authResult.user.name || 'Driver'
-        );
-        console.log(`Status change notification sent to customer: ${updatedBooking.user._id}`);
-      } catch (notificationError) {
-        console.error('Failed to send status notification:', notificationError);
+    if (!status) {
+      throw new ApiError(400, "Status is required");
+    }
+
+    // Valid status transitions - ADD 'dropped_at_center'
+    const validStatuses = [
+      "pending",
+      "accepted",
+      "in_progress",
+      "pickup_completed",
+      "en_route_to_dropoff",
+      "arrived_at_dropoff",
+      "dropped_at_center", // NEW STATUS
+      "completed",
+      "cancelled",
+      "rejected",
+    ];
+
+    if (!validStatuses.includes(status)) {
+      throw new ApiError(
+        400,
+        `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
+      );
+    }
+
+    try {
+      const existingBooking = await Booking.findById(bookingId).populate(
+        "user",
+        "name email",
+      );
+
+      if (!existingBooking) {
+        throw new ApiError(404, "Booking not found");
       }
-    }
 
-    res.status(200).json(
-      new ApiResponse(
-        200,
-        {
-          bookingId: updatedBooking._id,
-          status: updatedBooking.status,
-          updatedAt: updateData.updatedAt,
-          ...(updatedBooking.startedAt && { startedAt: updatedBooking.startedAt }),
-          ...(updatedBooking.completedAt && { completedAt: updatedBooking.completedAt }),
-          ...(updatedBooking.pickupCompletedAt && { pickupCompletedAt: updatedBooking.pickupCompletedAt }),
-          ...(updatedBooking.dropoffCompletedAt && { dropoffCompletedAt: updatedBooking.dropoffCompletedAt }),
-          ...(updatedBooking.cancelledAt && { cancelledAt: updatedBooking.cancelledAt })
-        },
-        getStatusUpdateMessage(status)
-      )
-    );
+      // Authorization checks
+      if (userType === "driver") {
+        if (
+          existingBooking.driver &&
+          existingBooking.driver.toString() !== userId.toString()
+        ) {
+          throw new ApiError(403, "You can only update your own bookings");
+        }
+      } else if (userType === "customer") {
+        if (existingBooking.user?._id.toString() !== userId.toString()) {
+          throw new ApiError(403, "You can only update your own bookings");
+        }
+      } else {
+        throw new ApiError(
+          403,
+          "Only drivers and customers can update booking status",
+        );
+      }
 
-  } catch (error) {
-    console.error('Update booking status error:', error);
-    
-    if (error instanceof ApiError) {
-      throw error;
+      // Validate status transitions - UPDATE to include dropped_at_center
+      const currentStatus = existingBooking.status;
+      const validTransitions: Record<string, string[]> = {
+        pending: ["accepted", "rejected", "cancelled"],
+        accepted: ["in_progress", "cancelled"],
+        in_progress: ["pickup_completed", "cancelled"],
+        pickup_completed: ["en_route_to_dropoff", "cancelled"],
+        en_route_to_dropoff: ["arrived_at_dropoff", "cancelled"],
+        arrived_at_dropoff: ["dropped_at_center", "cancelled"], // UPDATED
+        dropped_at_center: ["completed", "cancelled"], // NEW
+        completed: [],
+        cancelled: [],
+        rejected: [],
+      };
+
+      if (!validTransitions[currentStatus]?.includes(status)) {
+        throw new ApiError(
+          400,
+          `Invalid status transition from ${currentStatus} to ${status}`,
+        );
+      }
+
+      // Prepare update object
+      const updateData: any = {
+        status,
+        updatedAt: new Date(),
+      };
+
+      // Add timestamp fields based on status
+      switch (status) {
+        case "accepted":
+          if (driverId) {
+            updateData.driver = driverId;
+            updateData.acceptedAt = new Date();
+          }
+          break;
+        case "in_progress":
+          if (driverId) {
+            updateData.driver = driverId;
+          }
+          updateData.startedAt = startedAt ? new Date(startedAt) : new Date();
+          break;
+        case "pickup_completed":
+          updateData.pickupCompletedAt = pickupCompletedAt
+            ? new Date(pickupCompletedAt)
+            : new Date();
+          break;
+        case "dropped_at_center": // NEW CASE
+          updateData.dropoffCompletedAt = dropoffCompletedAt
+            ? new Date(dropoffCompletedAt)
+            : new Date();
+          if (routeDistance) {
+            updateData.routeDistance = routeDistance;
+          }
+          if (routeDuration) {
+            updateData.routeDuration = routeDuration;
+          }
+          break;
+        case "completed":
+          updateData.completedAt = completedAt
+            ? new Date(completedAt)
+            : new Date();
+          if (!updateData.dropoffCompletedAt) {
+            updateData.dropoffCompletedAt = dropoffCompletedAt
+              ? new Date(dropoffCompletedAt)
+              : new Date();
+          }
+          break;
+        case "cancelled":
+          updateData.cancelledAt = new Date();
+          if (notes) {
+            updateData.cancellationReason = notes;
+          }
+          break;
+      }
+
+      // Add optional fields
+      if (location) {
+        updateData.currentLocation = location;
+      }
+      if (notes) {
+        updateData.statusNotes = notes;
+      }
+
+      // Update the booking
+      const updatedBooking = (await Booking.findByIdAndUpdate(
+        bookingId,
+        updateData,
+        { new: true },
+      ).populate("user", "name email")) as unknown as PopulatedBooking;
+
+      if (!updatedBooking) {
+        throw new ApiError(404, "Failed to update booking");
+      }
+
+      // Send notifications
+      if (updatedBooking.user) {
+        try {
+          await sendStatusChangeNotification(
+            updatedBooking.user._id,
+            bookingId,
+            status,
+            driverName || authResult.user.name || "Driver",
+          );
+          console.log(
+            `Status change notification sent to customer: ${updatedBooking.user._id}`,
+          );
+        } catch (notificationError) {
+          console.error(
+            "Failed to send status notification:",
+            notificationError,
+          );
+        }
+      }
+
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          {
+            bookingId: updatedBooking._id,
+            status: updatedBooking.status,
+            updatedAt: updateData.updatedAt,
+            ...(updatedBooking.startedAt && {
+              startedAt: updatedBooking.startedAt,
+            }),
+            ...(updatedBooking.completedAt && {
+              completedAt: updatedBooking.completedAt,
+            }),
+            ...(updatedBooking.pickupCompletedAt && {
+              pickupCompletedAt: updatedBooking.pickupCompletedAt,
+            }),
+            ...(updatedBooking.dropoffCompletedAt && {
+              dropoffCompletedAt: updatedBooking.dropoffCompletedAt,
+            }),
+            ...(updatedBooking.cancelledAt && {
+              cancelledAt: updatedBooking.cancelledAt,
+            }),
+          },
+          getStatusUpdateMessage(status),
+        ),
+      );
+    } catch (error) {
+      console.error("Update booking status error:", error);
+
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      throw new ApiError(
+        500,
+        `Failed to update booking status: ${(error as Error)?.message || "Unknown error"}`,
+      );
     }
-    
-    throw new ApiError(
-      500,
-      `Failed to update booking status: ${(error as Error)?.message || 'Unknown error'}`
-    );
-  }
-});
+  },
+);
 
 // Helper function to get status messages
 // function getStatusUpdateMessage(status: string): string {
@@ -2510,7 +2719,7 @@ export const updateBookingStatus = asyncHandler(async (req: Request, res: Respon
 //     'cancelled': 'Booking cancelled',
 //     'rejected': 'Booking rejected'
 //   };
-  
+
 //   return messages[status] || 'Status updated';
 // }
 
@@ -2518,20 +2727,34 @@ export const updateBookingStatus = asyncHandler(async (req: Request, res: Respon
  * Send status change notification - uses your existing NotificationService pattern
  */
 const sendStatusChangeNotification = async (
-  userId: mongoose.Types.ObjectId, 
-  bookingId: string, 
-  status: string, 
-  driverName: string
+  userId: mongoose.Types.ObjectId,
+  bookingId: string,
+  status: string,
+  driverName: string,
 ) => {
   const notificationData = getNotificationForStatus(status, driverName);
-  
+
   if (!notificationData) return;
 
   // Check if you have specific notification methods like in your existing code
-  if (status === 'accepted' && typeof NotificationService.sendBookingAcceptedNotification === 'function') {
-    await NotificationService.sendBookingAcceptedNotification(userId.toString(), bookingId, driverName);
-  } else if (status === 'rejected' && typeof NotificationService.sendBookingRejectedNotification === 'function') {
-    await NotificationService.sendBookingRejectedNotification(userId.toString(), bookingId, driverName);
+  if (
+    status === "accepted" &&
+    typeof NotificationService.sendBookingAcceptedNotification === "function"
+  ) {
+    await NotificationService.sendBookingAcceptedNotification(
+      userId.toString(),
+      bookingId,
+      driverName,
+    );
+  } else if (
+    status === "rejected" &&
+    typeof NotificationService.sendBookingRejectedNotification === "function"
+  ) {
+    await NotificationService.sendBookingRejectedNotification(
+      userId.toString(),
+      bookingId,
+      driverName,
+    );
   } else {
     // Use generic createNotification method
     await NotificationService.createNotification({
@@ -2544,8 +2767,8 @@ const sendStatusChangeNotification = async (
         bookingId,
         status,
         driverName,
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
     });
   }
 };
@@ -2554,54 +2777,59 @@ const sendStatusChangeNotification = async (
  * Get notification data for status
  */
 const getNotificationForStatus = (status: string, driverName: string) => {
-  const notifications: Record<string, {
-    title: string;
-    message: string;
-    type: NotificationType;
-    priority: 'high' | 'normal' | 'low';
-  }> = {
-    'accepted': {
-      title: 'Booking Accepted!',
-      message: `Your dry cleaning pickup has been accepted by ${driverName}. They will arrive shortly.`,
-      type: 'booking_accepted',
-      priority: 'high'
-    },
-    'in_progress': {
-      title: 'Driver is on the way!',
-      message: `${driverName} has started the trip and is heading to your pickup location.`,
-      type: 'driver_update',
-      priority: 'high'
-    },
-    'pickup_completed': {
-      title: 'Items Picked Up!',
-      message: `${driverName} has collected your dry cleaning items and is heading to the cleaners.`,
-      type: 'driver_update',
-      priority: 'normal'
-    },
-    'en_route_to_dropoff': {
-      title: 'On the way back!',
-      message: `${driverName} is returning with your cleaned items.`,
-      type: 'driver_update',
-      priority: 'normal'
-    },
-    'arrived_at_dropoff': {
-      title: 'Driver has arrived!',
-      message: `${driverName} has arrived at your dropoff location.`,
-      type: 'driver_update',
-      priority: 'high'
-    },
-    'completed': {
-      title: 'Trip Completed!',
-      message: 'Your dry cleaning service has been completed successfully. Thank you for choosing our service!',
-      type: 'general',
-      priority: 'normal'
-    },
-    'cancelled': {
-      title: 'Booking Cancelled',
-      message: 'Your dry cleaning booking has been cancelled. Please book again if needed.',
-      type: 'general',
-      priority: 'high'
+  const notifications: Record<
+    string,
+    {
+      title: string;
+      message: string;
+      type: NotificationType;
+      priority: "high" | "normal" | "low";
     }
+  > = {
+    accepted: {
+      title: "Booking Accepted!",
+      message: `Your dry cleaning pickup has been accepted by ${driverName}. They will arrive shortly.`,
+      type: "booking_accepted",
+      priority: "high",
+    },
+    in_progress: {
+      title: "Driver is on the way!",
+      message: `${driverName} has started the trip and is heading to your pickup location.`,
+      type: "driver_update",
+      priority: "high",
+    },
+    pickup_completed: {
+      title: "Items Picked Up!",
+      message: `${driverName} has collected your dry cleaning items and is heading to the cleaners.`,
+      type: "driver_update",
+      priority: "normal",
+    },
+    en_route_to_dropoff: {
+      title: "On the way back!",
+      message: `${driverName} is returning with your cleaned items.`,
+      type: "driver_update",
+      priority: "normal",
+    },
+    arrived_at_dropoff: {
+      title: "Driver has arrived!",
+      message: `${driverName} has arrived at your dropoff location.`,
+      type: "driver_update",
+      priority: "high",
+    },
+    completed: {
+      title: "Trip Completed!",
+      message:
+        "Your dry cleaning service has been completed successfully. Thank you for choosing our service!",
+      type: "general",
+      priority: "normal",
+    },
+    cancelled: {
+      title: "Booking Cancelled",
+      message:
+        "Your dry cleaning booking has been cancelled. Please book again if needed.",
+      type: "general",
+      priority: "high",
+    },
   };
 
   return notifications[status] || null;
@@ -2612,302 +2840,329 @@ const getNotificationForStatus = (status: string, driverName: string) => {
  */
 function getStatusUpdateMessage(status: string): string {
   const messages: Record<string, string> = {
-    'pending': 'Booking is pending',
-    'accepted': 'Booking accepted successfully',
-    'in_progress': 'Trip started',
-    'pickup_completed': 'Items picked up successfully',
-    'en_route_to_dropoff': 'En route to dropoff location',
-    'arrived_at_dropoff': 'Arrived at dropoff location',
-    'dropped_at_center': 'Items dropped at dry cleaning center',
-    'completed': 'Booking completed successfully',
-    'cancelled': 'Booking cancelled',
-    'rejected': 'Booking rejected'
+    pending: "Booking is pending",
+    accepted: "Booking accepted successfully",
+    in_progress: "Trip started",
+    pickup_completed: "Items picked up successfully",
+    en_route_to_dropoff: "En route to dropoff location",
+    arrived_at_dropoff: "Arrived at dropoff location",
+    dropped_at_center: "Items dropped at dry cleaning center",
+    completed: "Booking completed successfully",
+    cancelled: "Booking cancelled",
+    rejected: "Booking rejected",
   };
-  
-  return messages[status] || 'Status updated';
+
+  return messages[status] || "Status updated";
 }
 
 /**
  * Cancel booking by driver - for when driver cancels after accepting
  * PUT /api/bookings/driver-cancel
  */
-export const driverCancelBooking = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
- 
-  if (authResult.userType !== "driver") {
-    throw new ApiError(403, "Only drivers can cancel bookings using this endpoint");
-  }
- 
-  const driverId = authResult.user._id;
-  const {
-    bookingId,
-    cancellationReason,
-    driverName
-  } = req.body;
+export const driverCancelBooking = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
 
-  if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
-    throw new ApiError(400, 'Invalid booking ID format');
-  }
+    if (authResult.userType !== "driver") {
+      throw new ApiError(
+        403,
+        "Only drivers can cancel bookings using this endpoint",
+      );
+    }
 
-  try {
-    const existingBooking = await Booking.findOne({
+    const driverId = authResult.user._id;
+    const { bookingId, cancellationReason, driverName } = req.body;
+
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      throw new ApiError(400, "Invalid booking ID format");
+    }
+
+    try {
+      const existingBooking = (await Booking.findOne({
+        _id: bookingId,
+        driver: driverId,
+      }).populate("user", "name email")) as PopulatedBooking | null;
+
+      if (!existingBooking) {
+        throw new ApiError(404, "Booking not found or not assigned to you");
+      }
+
+      // Check if booking can be cancelled by driver
+      if (["completed", "cancelled"].includes(existingBooking.status)) {
+        throw new ApiError(
+          400,
+          `Cannot cancel booking with status: ${existingBooking.status}`,
+        );
+      }
+
+      // Make available to other drivers instead of cancelling
+      const updateData = {
+        status: "pending", // Make it available again
+        driver: null, // Remove current driver assignment
+        cancelledAt: new Date(),
+        cancellationReason:
+          cancellationReason || "Driver cancelled - now available for others",
+        updatedAt: new Date(),
+      };
+
+      const updatedBooking = (await Booking.findByIdAndUpdate(
+        bookingId,
+        updateData,
+        { new: true },
+      ).populate("user", "name email")) as unknown as PopulatedBooking;
+
+      // Send notification to customer
+      if (updatedBooking?.user) {
+        try {
+          await NotificationService.createNotification({
+            userId: updatedBooking.user._id.toString(),
+            title: "Driver Changed",
+            message: `${driverName || "Your driver"} had to cancel, but we're finding you another driver. Your booking is still active.`,
+            type: "driver_update" as NotificationType,
+            priority: "high",
+            data: {
+              bookingId: updatedBooking._id.toString(),
+              reason: cancellationReason,
+              cancelledBy: "driver",
+              status: "finding_new_driver",
+              timestamp: new Date().toISOString(),
+            },
+          });
+          console.log(
+            "Driver cancellation notification sent to customer:",
+            updatedBooking.user._id,
+          );
+        } catch (notificationError) {
+          console.error(
+            "Failed to send driver cancellation notification:",
+            notificationError,
+          );
+        }
+      }
+
+      // Notify other available drivers about this booking
+      await notifyOtherAvailableDrivers(updatedBooking, driverId.toString());
+
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          {
+            bookingId: updatedBooking._id,
+            status: updatedBooking.status,
+            cancelledAt: updatedBooking.cancelledAt,
+            cancellationReason: updatedBooking.cancellationReason,
+          },
+          "Booking cancelled successfully. Other drivers have been notified and can accept this booking.",
+        ),
+      );
+    } catch (error) {
+      console.error("Driver cancel booking error:", error);
+
+      if (error instanceof ApiError) {
+        throw error;
+      }
+
+      throw new ApiError(
+        500,
+        `Failed to cancel booking: ${(error as Error)?.message || "Unknown error"}`,
+      );
+    }
+  },
+);
+
+/**
+ * User cancel booking with refund processing
+ */
+export const cancelBooking = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = (await verifyAuthentication(req)) as AuthResult;
+
+    if (authResult.userType !== "user") {
+      throw new ApiError(403, "Only users can cancel their bookings");
+    }
+
+    const { bookingId } = req.params;
+    const { cancellationReason } = req.body;
+
+    if (!bookingId) {
+      throw new ApiError(400, "Booking ID is required");
+    }
+
+    const booking = await Booking.findOne({
       _id: bookingId,
-      driver: driverId
-    }).populate('user', 'name email') as PopulatedBooking | null;
+      user: authResult.user._id,
+    });
 
-    if (!existingBooking) {
-      throw new ApiError(404, 'Booking not found or not assigned to you');
+    if (!booking) {
+      throw new ApiError(404, "Booking not found");
     }
 
-    // Check if booking can be cancelled by driver
-    if (['completed', 'cancelled'].includes(existingBooking.status)) {
-      throw new ApiError(400, `Cannot cancel booking with status: ${existingBooking.status}`);
+    if (booking.status === "completed") {
+      throw new ApiError(400, "Cannot cancel completed booking");
     }
 
-    // Make available to other drivers instead of cancelling
-    const updateData = {
-      status: 'pending', // Make it available again
-      driver: null, // Remove current driver assignment
-      cancelledAt: new Date(),
-      cancellationReason: cancellationReason || 'Driver cancelled - now available for others',
-      updatedAt: new Date()
-    };
+    if (booking.status === "cancelled") {
+      throw new ApiError(400, "Booking is already cancelled");
+    }
 
-    const updatedBooking = await Booking.findByIdAndUpdate(
-      bookingId,
-      updateData,
-      { new: true }
-    ).populate('user', 'name email') as unknown as PopulatedBooking;
+    let refundProcessed = false;
 
-    // Send notification to customer
-    if (updatedBooking?.user) {
+    // Process refund if payment was made
+    if (booking.paymentStatus === "paid" && booking.paymentIntentId) {
       try {
-        await NotificationService.createNotification({
-          userId: updatedBooking.user._id.toString(),
-          title: 'Driver Changed',
-          message: `${driverName || 'Your driver'} had to cancel, but we're finding you another driver. Your booking is still active.`,
-          type: 'driver_update' as NotificationType,
-          priority: 'high',
-          data: {
-            bookingId: updatedBooking._id.toString(),
-            reason: cancellationReason,
-            cancelledBy: 'driver',
-            status: 'finding_new_driver',
-            timestamp: new Date().toISOString()
-          }
-        });
-        console.log('Driver cancellation notification sent to customer:', updatedBooking.user._id);
-      } catch (notificationError) {
-        console.error('Failed to send driver cancellation notification:', notificationError);
+        // Uncomment when you have Stripe configured
+        // const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+        // const refund = await stripe.refunds.create({
+        //   payment_intent: booking.paymentIntentId,
+        //   reason: "requested_by_customer",
+        // });
+        // if (refund.status === "succeeded") {
+        //   refundProcessed = true;
+        // }
+      } catch (refundError: any) {
+        console.error("Error processing refund:", refundError);
       }
     }
 
-    // Notify other available drivers about this booking
-    await notifyOtherAvailableDrivers(updatedBooking, driverId.toString());
+    const updatedBooking = await Booking.findByIdAndUpdate(
+      bookingId,
+      {
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancellationReason: cancellationReason || "Cancelled by user",
+        paymentStatus: refundProcessed ? "refunded" : booking.paymentStatus,
+        driver: null, // Remove driver assignment if any
+      },
+      { new: true },
+    ).populate("dryCleaner", "shopname address phoneNumber");
+
+    res
+      .status(200)
+      .json(
+        new ApiResponse(
+          200,
+          { booking: updatedBooking, refundProcessed },
+          refundProcessed
+            ? "Booking cancelled successfully and refund processed"
+            : "Booking cancelled successfully",
+        ),
+      );
+  },
+);
+
+// Add this to your merchant controller file
+export const getMerchantBookings = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+
+    // Check if user is a merchant
+    if (authResult.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can view their bookings");
+    }
+
+    const { status, page = "1", limit = "10" } = req.query;
+
+    const currentPage = parseInt(toString(page), 10);
+    const pageSize = parseInt(toString(limit), 10);
+    const skip = (currentPage - 1) * pageSize;
+
+    console.log("=== DEBUG: Merchant Bookings ===");
+    console.log("Merchant ID:", authResult.user._id);
+
+    // DEBUG: Check all dry cleaners in database
+    const allDryCleaners = await DryCleaner.find({}).limit(5);
+    console.log("Total dry cleaners in DB:", await DryCleaner.countDocuments());
+    if (allDryCleaners.length > 0) {
+      console.log(
+        "Sample dry cleaner structure:",
+        JSON.stringify(allDryCleaners[0], null, 2),
+      );
+    }
+
+    // Try multiple field variations to find the correct one
+    const byMerchant = await DryCleaner.find({ merchant: authResult.user._id });
+    const byOwner = await DryCleaner.find({ owner: authResult.user._id });
+    const byMerchantId = await DryCleaner.find({
+      merchantId: authResult.user._id,
+    });
+    const byUserId = await DryCleaner.find({ userId: authResult.user._id });
+    const byCreatedBy = await DryCleaner.find({
+      createdBy: authResult.user._id,
+    });
+
+    console.log("Found by merchant field:", byMerchant.length);
+    console.log("Found by owner field:", byOwner.length);
+    console.log("Found by merchantId field:", byMerchantId.length);
+    console.log("Found by userId field:", byUserId.length);
+    console.log("Found by createdBy field:", byCreatedBy.length);
+
+    // Use the field that returned results (adjust based on your schema)
+    let dryCleaners = byMerchant;
+    if (byOwner.length > 0) dryCleaners = byOwner;
+    else if (byMerchantId.length > 0) dryCleaners = byMerchantId;
+    else if (byUserId.length > 0) dryCleaners = byUserId;
+    else if (byCreatedBy.length > 0) dryCleaners = byCreatedBy;
+
+    const dryCleanerIds = dryCleaners.map((dc) => dc._id);
+    console.log("Found dry cleaners:", dryCleanerIds);
+
+    if (dryCleanerIds.length === 0) {
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          {
+            bookings: [],
+            pagination: {
+              currentPage,
+              totalPages: 0,
+              totalBookings: 0,
+              hasNext: false,
+              hasPrev: false,
+            },
+          },
+          "No dry cleaners found for this merchant",
+        ),
+      );
+      return;
+    }
+
+    // Query for bookings where dryCleaner is in the merchant's shops
+    const query: any = { dryCleaner: { $in: dryCleanerIds } };
+
+    if (status) {
+      query.status = toString(status);
+    }
+
+    console.log("Booking query:", query);
+
+    const bookings = await Booking.find(query)
+      .populate("user", "firstName lastName phoneNumber email")
+      .populate("dryCleaner", "shopname address phoneNumber")
+      .populate("driver", "firstName lastName phoneNumber")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(pageSize);
+
+    const totalBookings = await Booking.countDocuments(query);
+
+    console.log("Found bookings:", bookings.length);
+    console.log("=== END DEBUG ===");
 
     res.status(200).json(
       new ApiResponse(
         200,
         {
-          bookingId: updatedBooking._id,
-          status: updatedBooking.status,
-          cancelledAt: updatedBooking.cancelledAt,
-          cancellationReason: updatedBooking.cancellationReason
+          bookings,
+          pagination: {
+            currentPage,
+            totalPages: Math.ceil(totalBookings / pageSize),
+            totalBookings,
+            hasNext: skip + bookings.length < totalBookings,
+            hasPrev: currentPage > 1,
+          },
         },
-        'Booking cancelled successfully. Other drivers have been notified and can accept this booking.'
-      )
+        "Merchant bookings retrieved successfully",
+      ),
     );
-
-  } catch (error) {
-    console.error('Driver cancel booking error:', error);
-   
-    if (error instanceof ApiError) {
-      throw error;
-    }
-   
-    throw new ApiError(
-      500,
-      `Failed to cancel booking: ${(error as Error)?.message || 'Unknown error'}`
-    );
-  }
-});
-
-/**
- * User cancel booking with refund processing
- */
-export const cancelBooking = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req) as AuthResult;
-  
-  if (authResult.userType !== "user") {
-    throw new ApiError(403, "Only users can cancel their bookings");
-  }
-  
-  const { bookingId } = req.params;
-  const { cancellationReason } = req.body;
-  
-  if (!bookingId) {
-    throw new ApiError(400, "Booking ID is required");
-  }
-  
-  const booking = await Booking.findOne({
-    _id: bookingId,
-    user: authResult.user._id,
-  });
-  
-  if (!booking) {
-    throw new ApiError(404, "Booking not found");
-  }
-  
-  if (booking.status === "completed") {
-    throw new ApiError(400, "Cannot cancel completed booking");
-  }
-  
-  if (booking.status === "cancelled") {
-    throw new ApiError(400, "Booking is already cancelled");
-  }
-  
-  let refundProcessed = false;
-  
-  // Process refund if payment was made
-  if (booking.paymentStatus === "paid" && booking.paymentIntentId) {
-    try {
-      // Uncomment when you have Stripe configured
-      // const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-      // const refund = await stripe.refunds.create({
-      //   payment_intent: booking.paymentIntentId,
-      //   reason: "requested_by_customer",
-      // });
-      // if (refund.status === "succeeded") {
-      //   refundProcessed = true;
-      // }
-    } catch (refundError: any) {
-      console.error("Error processing refund:", refundError);
-    }
-  }
-  
-  const updatedBooking = await Booking.findByIdAndUpdate(
-    bookingId,
-    {
-      status: "cancelled",
-      cancelledAt: new Date(),
-      cancellationReason: cancellationReason || "Cancelled by user",
-      paymentStatus: refundProcessed ? "refunded" : booking.paymentStatus,
-      driver: null, // Remove driver assignment if any
-    },
-    { new: true }
-  ).populate("dryCleaner", "shopname address phoneNumber");
-  
-  res.status(200).json(
-    new ApiResponse(
-      200,
-      { booking: updatedBooking, refundProcessed },
-      refundProcessed
-        ? "Booking cancelled successfully and refund processed"
-        : "Booking cancelled successfully"
-    )
-  );
-});
-
-
-
-
-// Add this to your merchant controller file
-export const getMerchantBookings = asyncHandler(async (req: Request, res: Response) => {
-  const authResult = await verifyAuthentication(req);
-  
-  // Check if user is a merchant
-  if (authResult.userType !== "merchant") {
-    throw new ApiError(403, "Only merchants can view their bookings");
-  }
-
-  const { status, page = "1", limit = "10" } = req.query;
-  
-  const currentPage = parseInt(toString(page), 10);
-  const pageSize = parseInt(toString(limit), 10);
-  const skip = (currentPage - 1) * pageSize;
-
-  console.log('=== DEBUG: Merchant Bookings ===');
-  console.log('Merchant ID:', authResult.user._id);
-  
-  // DEBUG: Check all dry cleaners in database
-  const allDryCleaners = await DryCleaner.find({}).limit(5);
-  console.log('Total dry cleaners in DB:', await DryCleaner.countDocuments());
-  if (allDryCleaners.length > 0) {
-    console.log('Sample dry cleaner structure:', JSON.stringify(allDryCleaners[0], null, 2));
-  }
-  
-  // Try multiple field variations to find the correct one
-  const byMerchant = await DryCleaner.find({ merchant: authResult.user._id });
-  const byOwner = await DryCleaner.find({ owner: authResult.user._id });
-  const byMerchantId = await DryCleaner.find({ merchantId: authResult.user._id });
-  const byUserId = await DryCleaner.find({ userId: authResult.user._id });
-  const byCreatedBy = await DryCleaner.find({ createdBy: authResult.user._id });
-  
-  console.log('Found by merchant field:', byMerchant.length);
-  console.log('Found by owner field:', byOwner.length);
-  console.log('Found by merchantId field:', byMerchantId.length);
-  console.log('Found by userId field:', byUserId.length);
-  console.log('Found by createdBy field:', byCreatedBy.length);
-
-  // Use the field that returned results (adjust based on your schema)
-  let dryCleaners = byMerchant;
-  if (byOwner.length > 0) dryCleaners = byOwner;
-  else if (byMerchantId.length > 0) dryCleaners = byMerchantId;
-  else if (byUserId.length > 0) dryCleaners = byUserId;
-  else if (byCreatedBy.length > 0) dryCleaners = byCreatedBy;
-  
-  const dryCleanerIds = dryCleaners.map(dc => dc._id);
-  console.log('Found dry cleaners:', dryCleanerIds);
-
-  if (dryCleanerIds.length === 0) {
-    res.status(200).json(
-      new ApiResponse(200, {
-        bookings: [],
-        pagination: {
-          currentPage,
-          totalPages: 0,
-          totalBookings: 0,
-          hasNext: false,
-          hasPrev: false,
-        },
-      }, "No dry cleaners found for this merchant")
-    );
-    return;
-  }
-
-  // Query for bookings where dryCleaner is in the merchant's shops
-  const query: any = { dryCleaner: { $in: dryCleanerIds } };
-  
-  if (status) {
-    query.status = toString(status);
-  }
-
-  console.log('Booking query:', query);
-
-  const bookings = await Booking.find(query)
-    .populate("user", "firstName lastName phoneNumber email")
-    .populate("dryCleaner", "shopname address phoneNumber")
-    .populate("driver", "firstName lastName phoneNumber")
-    .sort({ createdAt: -1 })
-    .skip(skip)
-    .limit(pageSize);
-
-  const totalBookings = await Booking.countDocuments(query);
-
-  console.log('Found bookings:', bookings.length);
-  console.log('=== END DEBUG ===');
-
-  res.status(200).json(
-    new ApiResponse(200, {
-      bookings,
-      pagination: {
-        currentPage,
-        totalPages: Math.ceil(totalBookings / pageSize),
-        totalBookings,
-        hasNext: skip + bookings.length < totalBookings,
-        hasPrev: currentPage > 1,
-      },
-    }, "Merchant bookings retrieved successfully")
-  );
-});
-
+  },
+);
