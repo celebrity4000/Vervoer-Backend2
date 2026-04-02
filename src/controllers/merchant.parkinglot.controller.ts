@@ -48,8 +48,6 @@ export const registerParkingLot = asyncHandler(
         throw new ApiError(400, "UNKNOWN_USER");
       }
 
-      // --- FIX START ---
-      // Parse JSON strings back to objects/arrays before Zod validation
       if (typeof req.body.gpsLocation === "string") {
         req.body.gpsLocation = JSON.parse(req.body.gpsLocation);
       }
@@ -59,9 +57,8 @@ export const registerParkingLot = asyncHandler(
       if (typeof req.body.generalAvailable === "string") {
         req.body.generalAvailable = JSON.parse(req.body.generalAvailable);
       }
-      // --- FIX END ---
 
-      const rData = ParkingData.parse(req.body); // Now ParkingData.parse will receive the correct types
+      const rData = ParkingData.parse(req.body);
       let imageURL: string[] = [];
       if (req.files) {
         if (Array.isArray(req.files)) {
@@ -97,8 +94,6 @@ export const editParkingLot = asyncHandler(
     try {
       const parkingLotId = z.string().parse(req.params.id);
 
-      // --- FIX START ---
-      // Parse JSON strings back to objects/arrays before Zod validation
       if (typeof req.body.gpsLocation === "string") {
         req.body.gpsLocation = JSON.parse(req.body.gpsLocation);
       }
@@ -108,16 +103,14 @@ export const editParkingLot = asyncHandler(
       if (typeof req.body.generalAvailable === "string") {
         req.body.generalAvailable = JSON.parse(req.body.generalAvailable);
       }
-      // --- FIX END ---
 
-      const updateData = ParkingData.partial().parse(req.body); // Now ParkingData.partial().parse will receive the correct types
+      const updateData = ParkingData.partial().parse(req.body);
       const verifiedAuth = await verifyAuthentication(req);
 
       if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
         throw new ApiError(400, "UNAUTHORIZED");
       }
 
-      // Find the parking lot and verify ownership
       const parkingLot = await ParkingLotModel.findById(parkingLotId);
       if (!parkingLot) {
         throw new ApiError(404, "PARKING_LOT_NOT_FOUND");
@@ -131,7 +124,6 @@ export const editParkingLot = asyncHandler(
         throw new ApiError(403, "UNAUTHORIZED_ACCESS");
       }
 
-      // Update the parking lot with new data
       let imageURL: string[] = [];
       if (req.files) {
         if (Array.isArray(req.files)) {
@@ -145,12 +137,8 @@ export const editParkingLot = asyncHandler(
         }
       }
       if (imageURL.length > 0) {
-        // Ensure you're merging existing images if not re-uploaded
         updateData.images = [...(parkingLot.images || []), ...imageURL];
       } else {
-        // If no new images are uploaded, retain existing ones.
-        // This logic might need refinement if you want to allow deletion of images.
-        // For now, it just adds new ones or keeps old ones if no new ones are provided.
         updateData.images = parkingLot.images;
       }
       const updatedParkingLot = await ParkingLotModel.findByIdAndUpdate(
@@ -175,56 +163,49 @@ export const editParkingLot = asyncHandler(
   },
 );
 
+/**
+ * Get available spaces for a parking lot.
+ *
+ * FIX: Added "paymentDetails.status": "SUCCESS" filter.
+ * Previously there was NO status filter at all, meaning PENDING and FAILED
+ * bookings were counted as occupied slots, blocking users from booking them.
+ * Now only confirmed (SUCCESS) bookings are counted as occupied.
+ * Also simplified the overlap condition to a single clean $lt/$gt pair.
+ */
 export const getAvailableSpace = asyncHandler(async (req, res) => {
   try {
     const startDate = z.iso.datetime().parse(req.query.startDate);
     const lastDate = z.iso.datetime().parse(req.query.lastDate);
     const lotID = z.string().parse(req.query.lotId);
+
     const lotData = await ParkingLotModel.findById(lotID);
-    let totalSpace = 0;
     if (!lotData) throw new ApiError(400, "Can't Find The Lot");
+
+    let totalSpace = 0;
     lotData.spacesList?.forEach((v) => {
       totalSpace += v.count;
     });
 
+    // ✅ FIX: Only SUCCESS bookings occupy a slot.
+    // PENDING = checkout started but not paid yet (must not block other users)
+    // FAILED  = payment failed (must not block other users)
+    // Single overlap condition: booking starts before query end AND ends after query start
     const result = await LotRentRecordModel.find(
       {
         lotId: lotID,
-        $or: [
-          {
-            $and: [
-              // collision with starting date
-              { rentFrom: { $lte: startDate } },
-              { rentTo: { $gte: startDate } },
-            ],
-          },
-          {
-            $and: [
-              // collision with end date
-              { rentFrom: { $lte: lastDate } },
-              { rentTo: { $gte: lastDate } },
-            ],
-          },
-          {
-            $and: [
-              // collision within  date
-              { rentFrom: { $gte: startDate } },
-              { rentTo: { $lte: lastDate } },
-            ],
-          },
-        ],
+        "paymentDetails.status": "SUCCESS",
+        rentFrom: { $lt: new Date(lastDate) },
+        rentTo: { $gt: new Date(startDate) },
       },
       "-renterInfo",
     ).exec();
 
-    res
-      .status(200)
-      .json(
-        new ApiResponse(200, {
-          availableSpace: totalSpace - result.length,
-          bookedSlot: result,
-        }),
-      );
+    res.status(200).json(
+      new ApiResponse(200, {
+        availableSpace: totalSpace - result.length,
+        bookedSlot: result,
+      }),
+    );
   } catch (err) {
     if (err instanceof z.ZodError) {
       throw new ApiError(400, "INVALID_QUERY", err.issues);
@@ -235,6 +216,7 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
     }
   }
 });
+
 const LotCheckOutData = z
   .object({
     lotId: z.string(),
@@ -247,52 +229,40 @@ const LotCheckOutData = z
       to: z.iso.datetime(),
     }),
     couponCode: z.string().optional(),
-    vehicleNumber: z.string().optional(),   
-    paymentMethod: z.string().optional(), 
+    vehicleNumber: z.string().optional(),
+    paymentMethod: z.string().optional(),
   })
   .refine((data) => data.bookingPeriod.from < data.bookingPeriod.to);
 type LotCheckOutData = z.infer<typeof LotCheckOutData>;
 
+/**
+ * Check if a specific slot has a conflicting SUCCESS booking.
+ * Only SUCCESS bookings count — PENDING and FAILED do not block slots.
+ */
 async function findExistingBooking(
   sd: Date | mongoose.Schema.Types.Date,
   ed: Date | mongoose.Schema.Types.Date,
   lotId: string | mongoose.Types.ObjectId,
   rentedSlotId: string,
 ) {
-  if (sd >= ed) {
-    throw new ApiError(400, "INVALID_DATE");
-  }
+  if (sd >= ed) throw new ApiError(400, "INVALID_DATE");
+
+  const now = new Date();
+
+  // ✅ FIX: Changed { $ne: "PENDING" } to "SUCCESS" only.
+  // Previously FAILED bookings were blocking slots at checkout time.
   const res = await LotRentRecordModel.find({
     lotId: lotId,
     rentedSlot: rentedSlotId,
-    "paymentDetails.status": { $ne: "PENDING" },
-    $or: [
-      {
-        $and: [
-          // collision with starting date
-          { rentFrom: { $lte: sd } },
-          { rentTo: { $gte: sd } },
-        ],
-      },
-      {
-        $and: [
-          // collision with end date
-          { rentFrom: { $lte: ed } },
-          { rentTo: { $gte: ed } },
-        ],
-      },
-      {
-        $and: [
-          // collision within  date
-          { rentFrom: { $gte: sd } },
-          { rentTo: { $lte: ed } },
-        ],
-      },
-    ],
+    "paymentDetails.status": "SUCCESS",
+    rentTo: { $gt: now },
+    rentFrom: { $lt: ed as Date },
+    rentTo: { $gt: sd as Date },
   }).exec();
 
   return res;
 }
+
 function verifySelectedZone(
   lotDoc: mongoose.Document<mongoose.Types.ObjectId, {}, IParking> & IParking,
   slot: LotCheckOutData["bookedSlot"],
@@ -303,6 +273,7 @@ function verifySelectedZone(
   }
   return true;
 }
+
 function verifyCouponCode(code: string) {
   return code.startsWith("XES") ? 0.2 : 0;
 }
@@ -415,6 +386,7 @@ const updateACheckout = async (
     stripeDetails: updateInfo.paymentDetails.stripePaymentDetails,
   };
 };
+
 const createABooking = async (
   data: LotCheckOutData,
   lotDoc: MParkingRes & { owner: IMerchant },
@@ -520,6 +492,7 @@ const createABooking = async (
     },
   };
 };
+
 export const lotCheckOut = asyncHandler(async (req, res) => {
   try {
     const verifiedAuth = await verifyAuthentication(req);
@@ -540,11 +513,6 @@ export const lotCheckOut = asyncHandler(async (req, res) => {
     if (!lot) {
       throw new ApiError(400, "NO LOT FOUND");
     }
-
-    // const rentM = await  LotRentRecordModel.findOne({
-    //   renterInfo : USER._id ,
-    //   "paymentDetails.status" : "PENDING" ,
-    // })
 
     const data = await createABooking(rData, lot as any, USER);
 
@@ -570,7 +538,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
       throw new ApiError(401, "User must be a verified user");
     }
 
-    // ✅ Read paymentMethod directly from body before Zod parsing
     const paymentMethod = req.body.paymentMethod as string | undefined;
     const isCashPayment = paymentMethod === "CASH";
 
@@ -598,7 +565,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
       rentRecord.rentedSlot,
     );
 
-    // ✅ Skip Stripe verification entirely for CASH payments
     if (!isCashPayment) {
       if (!rentRecord.paymentDetails.stripePaymentDetails?.paymentIntentId) {
         throw new ApiError(400, "NO STRIPE RECORD FOUND");
@@ -646,12 +612,11 @@ export const getParkingLotbyId = asyncHandler(async (req, res) => {
     res.status(200).json(new ApiResponse(200, lotdetalis));
   } else throw new ApiError(400, "NOT_FOUND");
 });
+
 export const deleteParking = asyncHandler(async (req, res) => {
   try {
-    // ✅ READ FROM PARAMS (NOT QUERY)
     const lotId = req.params.id;
 
-    // ✅ Validate Mongo ObjectId
     if (!lotId || !mongoose.Types.ObjectId.isValid(lotId)) {
       throw new ApiError(400, "INVALID_ID");
     }
@@ -672,7 +637,6 @@ export const deleteParking = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, del, "DELETE_SUCCESSFUL"));
     }
 
-    // If not deleted, check reason
     if (await ParkingLotModel.findById(lotId)) {
       throw new ApiError(403, "ACCESS_DENIED");
     } else {
@@ -711,7 +675,7 @@ export const getLotBookingById = asyncHandler(
       if (!booking) {
         throw new ApiError(404, "Booking not found");
       }
-      // Verify the requesting merchant owns this parking lot
+
       console.log(booking);
       const parkingLot = await ParkingLotModel.findById(booking.lotId);
       console.log(
@@ -751,7 +715,6 @@ export const getLotBookingById = asyncHandler(
           totalHours: booking.totalHours,
         },
         type: "L",
-        // carLicensePlateImage: booking.carLicensePlateImage, // TODO: add carLicensePlateImage
         bookedSlot: booking.rentedSlot,
         priceRate: booking.priceRate,
         paymentDetails: {
@@ -766,8 +729,6 @@ export const getLotBookingById = asyncHandler(
           paidAt: booking.paymentDetails.paidAt,
         },
         status: booking.paymentDetails.status,
-        // createdAt: booking.createdAt,
-        // updatedAt: booking.updatedAt
       };
 
       res
@@ -802,14 +763,12 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
 
     const filter: mongoose.RootFilterQuery<ILotRecord> = {};
 
-    // If status is provided, add it to the filter
     if (status) {
       filter["paymentDetails.status"] = status;
     } else {
       filter["paymentDetails.status"] = { $ne: "PENDING" };
     }
 
-    // Get all parking lots owned by the merchant
     if (lotId) {
       filter.lotId = lotId;
     }
@@ -820,7 +779,6 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
           "_id",
         );
         const parkingLotIds = parkingLots.map((lot) => lot._id);
-        // Add parking lot filter
         filter.lotId = { $in: parkingLotIds };
       }
     }
@@ -849,6 +807,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         .lean(),
       LotRentRecordModel.countDocuments(filter),
     ]);
+
     console.log("Bookings", bookings.length);
     const formattedBookings = bookings.map((booking) => ({
       _id: booking._id,
@@ -871,7 +830,6 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         to: booking.rentTo,
         totalHours: booking.totalHours,
       },
-      // carLicensePlateImage: booking.carLicensePlateImage, // TODO
       bookedSlot: booking.rentedSlot,
       priceRate: booking.priceRate,
       paymentDetails: {
@@ -886,8 +844,8 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         paidAt: booking.paymentDetails.paidAt,
       },
       status: booking.paymentDetails.status,
-      // createdAt: booking.createdAt
     }));
+
     console.log("formatedBooking", formattedBookings);
     res.status(200).json(
       new ApiResponse(

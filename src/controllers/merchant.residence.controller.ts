@@ -109,12 +109,17 @@ export const getMerchantResidences = asyncHandler(async (req: Request, res: Resp
 
 async function findBookedResidenceIn(startDate: Date, endDate: Date, id?: string) {
   if (startDate >= endDate) return [];
+
+  const now = new Date();
+
   const q: mongoose.FilterQuery<IResidenceBooking> = {
     "paymentDetails.status": "SUCCESS",
+    // ✅ Only consider bookings that haven't ended yet
+    "bookingPeriod.to": { $gt: now },
     "bookingPeriod.from": { $lt: endDate },
-    "bookingPeriod.to": { $gt: startDate }
+    "bookingPeriod.to": { $gt: startDate },
   };
-  if (id) q._id = id;
+  if (id) q.residenceId = id;
   return await ResidenceBookingModel.find(q);
 }
 

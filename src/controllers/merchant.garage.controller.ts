@@ -92,33 +92,26 @@ const BookingData = z.object({
 export const registerGarage = asyncHandler(
   async (req: Request, res: Response) => {
     try {
-      // Create a mutable copy of req.body to parse stringified JSON fields
       const requestBody = { ...req.body };
 
-      // Manually parse fields that are sent as stringified JSON from FormData
       if (typeof requestBody.location === 'string') {
         requestBody.location = JSON.parse(requestBody.location);
       }
       if (typeof requestBody.generalAvailable === 'string') {
         requestBody.generalAvailable = JSON.parse(requestBody.generalAvailable);
       }
-      
       if (requestBody.emergencyContact && typeof requestBody.emergencyContact === 'string') {
         requestBody.emergencyContact = JSON.parse(requestBody.emergencyContact);
       }
       if (typeof requestBody.spacesList === 'string') {
         requestBody.spacesList = JSON.parse(requestBody.spacesList);
       }
-
-      // Also parse stringified arrays for newly added fields
       if (requestBody.transportationTypes && typeof requestBody.transportationTypes === 'string') {
         requestBody.transportationTypes = JSON.parse(requestBody.transportationTypes);
       }
       if (requestBody.coveredDrivewayTypes && typeof requestBody.coveredDrivewayTypes === 'string') {
         requestBody.coveredDrivewayTypes = JSON.parse(requestBody.coveredDrivewayTypes);
       }
-
-      // Also ensure boolean and number types are correctly coerced if they arrive as strings
       if (typeof requestBody.is24x7 === 'string') {
         requestBody.is24x7 = requestBody.is24x7 === 'true';
       }
@@ -135,7 +128,6 @@ export const registerGarage = asyncHandler(
         requestBody.securityCamera = requestBody.securityCamera === 'true';
       }
 
-      // Validate full request with Zod
       const rData = GarageData.parse(requestBody);
 
       const verifiedAuth = await verifyAuthentication(req);
@@ -148,9 +140,7 @@ export const registerGarage = asyncHandler(
         throw new ApiError(400, "UNKNOWN_USER");
       }
 
-      // Upload images to Cloudinary if present
       let imageURL: string[] = [];
-
       if (req.files) {
         if (Array.isArray(req.files)) {
           imageURL = await Promise.all(
@@ -165,14 +155,12 @@ export const registerGarage = asyncHandler(
         }
       }
 
-      // Create new Garage record with all fields
       const newGarage = await Garage.create({
         owner: owner._id,
         images: imageURL,
         ...rData
       });
 
-      // Update Merchant document to mark they now have a garage
       await mongoose.model("Merchant").findByIdAndUpdate(owner._id, {
         haveGarage: true
       });
@@ -196,10 +184,8 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
   try {
     const garageId = z.string().parse(req.params.id);
 
-    // Create a mutable copy of req.body to parse stringified JSON fields
     const requestBody = { ...req.body };
 
-    // Manually parse fields that are sent as stringified JSON from FormData
     if (typeof requestBody.location === 'string') {
       requestBody.location = JSON.parse(requestBody.location);
     }
@@ -212,7 +198,6 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
     if (typeof requestBody.spacesList === 'string') {
       requestBody.spacesList = JSON.parse(requestBody.spacesList);
     }
-    // Also ensure boolean and number types are correctly coerced if they arrive as strings
     if (typeof requestBody.is24x7 === 'string') {
         requestBody.is24x7 = requestBody.is24x7 === 'true';
     }
@@ -220,7 +205,7 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
         requestBody.price = parseFloat(requestBody.price);
     }
 
-    const updateData = GarageData.partial().parse(requestBody); // Pass the parsed object to Zod
+    const updateData = GarageData.partial().parse(requestBody);
 
     const verifiedAuth = await verifyAuthentication(req);
     if (verifiedAuth?.userType !== "merchant" || !verifiedAuth?.user) {
@@ -247,23 +232,17 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
       }
     }
 
-    let finalImages: string[] = [];
+    let finalImages: string[] = [...garage.images];
 
-    // Start with existing images from the garage model
-    finalImages = [...garage.images];
-
-    // Handle existing image URLs sent from frontend
     if (requestBody.existingImages && typeof requestBody.existingImages === 'string') {
       const existingImagesFromFrontend: string[] = JSON.parse(requestBody.existingImages);
       finalImages = finalImages.filter(url => existingImagesFromFrontend.includes(url));
     }
 
-    // Add newly uploaded images to the final list
     if (newlyUploadedImageURLs.length > 0) {
       finalImages = [...new Set([...finalImages, ...newlyUploadedImageURLs])];
     }
 
-    // Assign the combined images to updateData
     updateData.images = finalImages;
 
     const updatedGarage = await Garage.findByIdAndUpdate(
@@ -288,6 +267,11 @@ export const editGarage = asyncHandler(async (req: Request, res: Response) => {
 
 /**
  * Get available slots for a garage
+ *
+ * FIX: Changed status filter from { $ne: "PENDING" } to "SUCCESS" only.
+ * Previously FAILED bookings were being counted as occupied slots.
+ * Also simplified the time overlap to a single clean condition which
+ * avoids millisecond-precision misses from redundant $or branches.
  */
 export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -304,22 +288,15 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
     let totalSpace = 0;
     garage.spacesList?.forEach((e) => { totalSpace += e.count });
 
-    // Get all bookings that overlap with the requested time period
+    // ✅ FIX: Only SUCCESS bookings block slots.
+    // PENDING = not yet paid (should not block other users)
+    // FAILED  = payment failed (must not block other users)
+    // Single overlap condition covers all cases without millisecond gaps.
     const bookings = await GarageBooking.find({
       garageId,
-      "paymentDetails.status": { $ne: "PENDING" },
-      $or: [
-        {
-          'bookingPeriod.from': { $lte: new Date(endDate) },
-          'bookingPeriod.to': { $gte: new Date(startDate) }
-        },
-        {
-          'bookingPeriod.from': { $gte: new Date(startDate), $lte: new Date(endDate) }
-        },
-        {
-          'bookingPeriod.to': { $gte: new Date(startDate), $lte: new Date(endDate) }
-        }
-      ]
+      "paymentDetails.status": "SUCCESS",
+      "bookingPeriod.from": { $lt: new Date(endDate) },
+      "bookingPeriod.to": { $gt: new Date(startDate) },
     }, "-customerId").exec();
 
     res.status(200).json(new ApiResponse(200, { 
@@ -342,7 +319,6 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
 
 /**
  * Checkout and process payment for a parking booking
- * FIXED VERSION - Handles invalid Stripe customer IDs gracefully
  */
 export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -375,7 +351,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     
     console.log("✅ Garage verified:", garage.garageName);
     
-    // Verify slot
     const selectedZone = garage?.spacesList?.get(rData.bookedSlot.zone);
     console.log("🎯 Verifying slot:", rData.bookedSlot.slot, "in zone:", rData.bookedSlot.zone);
     console.log("📊 Zone capacity:", selectedZone);
@@ -384,26 +359,16 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       throw new ApiError(400, "INVALID_SLOT");
     }
     
-    // Check availability
     const bookedSlotId = generateParkingSpaceID(rData.bookedSlot.zone, rData.bookedSlot.slot.toString());
     console.log("🔍 Checking availability for slot:", bookedSlotId);
     
+    // ✅ FIX: Only SUCCESS bookings block a slot at checkout too
     const isNotAvailableSlot = await GarageBooking.findOne({
       garageId: rData.garageId,
       bookedSlot: bookedSlotId,
       "paymentDetails.status": "SUCCESS",
-      $or: [
-        {
-          'bookingPeriod.from': { $lte: new Date(rData.bookingPeriod.to) },
-          'bookingPeriod.to': { $gte: new Date(rData.bookingPeriod.from) }
-        },
-        {
-          'bookingPeriod.from': { $gte: new Date(rData.bookingPeriod.from), $lte: new Date(rData.bookingPeriod.to) }
-        },
-        {
-          'bookingPeriod.to': { $gte: new Date(rData.bookingPeriod.from), $lte: new Date(rData.bookingPeriod.to) }
-        }
-      ]
+      "bookingPeriod.from": { $lt: new Date(rData.bookingPeriod.to) },
+      "bookingPeriod.to": { $gt: new Date(rData.bookingPeriod.from) },
     });
     
     if (isNotAvailableSlot) {
@@ -413,7 +378,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     
     console.log("✅ Slot is available");
     
-    // Calculate pricing
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate = new Date(rData.bookingPeriod.to);
     const totalHours = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
@@ -422,7 +386,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     let couponApplied = false;
     let couponDetails = null;
 
-    // Apply coupon BEFORE calculating fees (discount is on base amount)
     if (rData.couponCode) {
       const isValidCoupon = await validateCoupon(rData.couponCode, verifiedAuth?.user);
       if (isValidCoupon) {
@@ -452,7 +415,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       totalToPay: amountToPaid
     });
     
-    // Determine payment method and initialize if needed
     let paymentGateway: "CASH" | "STRIPE" | "UPI";
     let stripeDetails = null;
     
@@ -600,7 +562,6 @@ async function validateCoupon(code: string, user: mongoose.Document<any, any, IU
 
 /**
  * Confirm and finalize a garage booking
- * This endpoint is called after checkout to complete the booking
  */
 export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) => {
   try {
@@ -638,10 +599,24 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       throw new ApiError(400, "ALREADY_BOOKED");
     }
 
+    // ✅ Final conflict check before confirming — use SUCCESS only
+    const conflictingBooking = await GarageBooking.findOne({
+      _id: { $ne: booking._id },
+      garageId: booking.garageId,
+      bookedSlot: booking.bookedSlot,
+      "paymentDetails.status": "SUCCESS",
+      "bookingPeriod.from": { $lt: booking.bookingPeriod.to },
+      "bookingPeriod.to": { $gt: booking.bookingPeriod.from },
+    });
+
+    if (conflictingBooking) {
+      booking.paymentDetails.status = "FAILED";
+      await booking.save();
+      throw new ApiError(400, "SLOT_NOT_AVAILABLE");
+    }
+
     /**
-     * =========================
      * CASH PAYMENT
-     * =========================
      */
     if (paymentMethod === "CASH") {
       console.log("💰 Processing CASH payment:", bookingId);
@@ -668,9 +643,7 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     }
 
     /**
-     * =========================
      * CARD / CREDIT PAYMENT
-     * =========================
      */
     if (paymentMethod === "CREDIT" || paymentMethod === "CARD") {
       console.log("💳 Processing CARD payment:", bookingId);
@@ -728,20 +701,12 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
       }
     }
 
-    /**
-     * =========================
-     * INVALID PAYMENT METHOD
-     * =========================
-     */
     throw new ApiError(400, "INVALID_PAYMENT_METHOD");
   } catch (err) {
     console.error("❌ Booking confirmation error:", err);
     throw err;
   }
 });
-
-
-
 
 /**
  * Get garage details
@@ -875,7 +840,6 @@ export const garageBookingInfo = asyncHandler(async (req: Request, res: Response
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
 
-    console.log(booking);
     const response = {
       _id: booking._id,
       garage: {
@@ -1028,8 +992,6 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     throw error;
   }
 });
-
-
 
 export const scanBookingQRCode = asyncHandler(async (req: Request, res: Response) => {
   const bookingId = req.params.id;
