@@ -3166,3 +3166,287 @@ export const getMerchantBookings = asyncHandler(
     );
   },
 );
+
+
+
+async function assertMerchantOwnsBooking(
+  bookingId: string,
+  merchantId: string,
+): Promise<InstanceType<typeof Booking>> {
+  const booking = await Booking.findById(bookingId).populate(
+    "user",
+    "firstName lastName phoneNumber email",
+  );
+ 
+  if (!booking) throw new ApiError(404, "Booking not found");
+ 
+  // Find all dry cleaners owned by this merchant
+  const dryCleaners = await DryCleaner.find({ owner: merchantId }).select("_id");
+  const ownedIds = dryCleaners.map((d) => d._id.toString());
+ 
+  if (!ownedIds.includes(booking.dryCleaner.toString())) {
+    throw new ApiError(403, "This booking does not belong to your shop");
+  }
+ 
+  return booking as any;
+}
+ 
+// ────────────────────────────────────────────────────────────
+// POST /users/merchant/book-delivery-driver
+//
+// Merchant selects a driver to deliver cleaned items to
+// the customer's address.
+// ────────────────────────────────────────────────────────────
+export const merchantBookDeliveryDriver = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+ 
+    if (authResult.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can book delivery drivers");
+    }
+ 
+    const merchantId = String(authResult.user._id);
+    const {
+      bookingId,
+      driverId,
+      pickupAddress,   // dry cleaner address (items being collected FROM here)
+      dropoffAddress,  // customer's address (deliver TO here)
+    } = req.body;
+ 
+    // ── Validation ──────────────────────────────
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      throw new ApiError(400, "Invalid booking ID");
+    }
+    if (!driverId || !mongoose.Types.ObjectId.isValid(driverId)) {
+      throw new ApiError(400, "Invalid driver ID");
+    }
+    if (!pickupAddress || !dropoffAddress) {
+      throw new ApiError(400, "Pickup and dropoff addresses are required");
+    }
+ 
+    const session = await mongoose.startSession();
+ 
+    try {
+      let updatedBooking: any = null;
+ 
+      await session.withTransaction(async () => {
+        // ── 1. Verify merchant owns this booking ──
+        const booking = await assertMerchantOwnsBooking(bookingId, merchantId);
+ 
+        // ── 2. Check booking status allows driver booking ──
+        const allowedStatuses = ["dropped_at_center", "ready_for_delivery"];
+        if (!allowedStatuses.includes(booking.status)) {
+          throw new ApiError(
+            400,
+            `Cannot book driver for a booking with status "${booking.status}". ` +
+            `Allowed statuses: ${allowedStatuses.join(", ")}`,
+          );
+        }
+ 
+        // ── 3. Check driver exists and is available ──
+        const driver = await Driver.findById(driverId).session(session);
+        if (!driver) throw new ApiError(404, "Driver not found");
+ 
+        if (driver.isBooked) {
+          throw new ApiError(400, "Selected driver is currently busy. Please choose another driver.");
+        }
+ 
+        // ── 4. Check driver has no conflicting active booking ──
+        const activeBooking = await Booking.findOne({
+          driver: driverId,
+          status: { $in: ["accepted", "in_progress", "pickup_completed", "en_route_to_dropoff"] },
+        }).session(session);
+ 
+        if (activeBooking) {
+          throw new ApiError(
+            400,
+            "This driver already has an active booking. Please choose another driver.",
+          );
+        }
+ 
+        // ── 5. Update the existing booking with the delivery driver ──
+        updatedBooking = await Booking.findByIdAndUpdate(
+          bookingId,
+          {
+            driver: driverId,
+            status: "accepted",          // Driver accepted the return delivery
+            pickupAddress: pickupAddress, // From dry cleaner
+            dropoffAddress: dropoffAddress, // To customer
+            bookingType: "delivery",
+            acceptedAt: new Date(),
+            // Mark that this is a merchant-initiated return delivery
+            // so the driver app knows where to pick up from
+            $set: {
+              "metadata.isReturnDelivery": true,
+              "metadata.merchantInitiated": true,
+              "metadata.merchantId": merchantId,
+            },
+          },
+          { new: true, session },
+        )
+          .populate("user", "firstName lastName phoneNumber email")
+          .populate("dryCleaner", "shopname address phoneNumber")
+          .populate("driver", "firstName lastName phoneNumber vehicleInfo");
+ 
+        if (!updatedBooking) {
+          throw new ApiError(500, "Failed to update booking");
+        }
+ 
+        // ── 6. Mark driver as booked ──
+        await Driver.findByIdAndUpdate(
+          driverId,
+          { isBooked: true },
+          { session },
+        );
+      });
+ 
+      await session.commitTransaction();
+ 
+      // ── 7. Send notifications (outside transaction) ──
+      if (updatedBooking) {
+        try {
+          // Notify the driver about the new pickup task
+          const driverUser = await Driver.findById(driverId);
+          if (driverUser) {
+            await NotificationService.createNotification({
+              userId: driverId,
+              title: "New Delivery Assignment",
+              message:
+                `You have been assigned to deliver cleaned items. ` +
+                `Pickup from dry cleaner, deliver to customer.`,
+              type: "booking_accepted",
+              priority: "high",
+              data: {
+                bookingId: updatedBooking._id.toString(),
+                bookingType: "return_delivery",
+                pickupAddress,
+                dropoffAddress,
+                orderNumber: updatedBooking.orderNumber,
+              },
+            });
+          }
+ 
+          // Notify the customer their order is on the way
+          if (updatedBooking.user) {
+            await NotificationService.createNotification({
+              userId: updatedBooking.user._id.toString(),
+              title: "Your Clothes Are On Their Way! 🚚",
+              message:
+                `Great news! Your cleaned items are being picked up from ` +
+                `${updatedBooking.dryCleaner?.shopname ?? "the dry cleaner"} ` +
+                `and will be delivered to you shortly.`,
+              type: "driver_update",
+              priority: "high",
+              data: {
+                bookingId: updatedBooking._id.toString(),
+                status: "accepted",
+                driverName: `${updatedBooking.driver?.firstName} ${updatedBooking.driver?.lastName}`,
+              },
+            });
+          }
+        } catch (notifError) {
+          // Notifications are non-critical; log but don't fail
+          console.error("Failed to send notifications:", notifError);
+        }
+      }
+ 
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          {
+            booking: updatedBooking,
+            message: "Driver successfully assigned for delivery",
+            driver: updatedBooking?.driver,
+          },
+          "Delivery driver booked successfully. The driver and customer have been notified.",
+        ),
+      );
+    } catch (error) {
+      await session.abortTransaction();
+      throw error;
+    } finally {
+      await session.endSession();
+    }
+  },
+);
+ 
+// ────────────────────────────────────────────────────────────
+// GET /users/merchant/bookings/:bookingId
+//
+// Merchant fetches full details of one of their orders.
+// (Reuses the existing getBookingDetails but provides a
+//  merchant-scoped alias with a cleaner URL.)
+// ────────────────────────────────────────────────────────────
+export const getMerchantBookingDetails = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+ 
+    if (authResult.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can access this endpoint");
+    }
+ 
+    const { bookingId } = req.params;
+ 
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      throw new ApiError(400, "Invalid booking ID");
+    }
+ 
+    const merchantId = String(authResult.user._id);
+    const booking = await assertMerchantOwnsBooking(bookingId, merchantId);
+ 
+    const populated = await Booking.findById(booking._id)
+      .populate("user", "firstName lastName phoneNumber email")
+      .populate("dryCleaner", "shopname address phoneNumber")
+      .populate("driver", "firstName lastName phoneNumber vehicleInfo rating");
+ 
+    res.status(200).json(
+      new ApiResponse(200, populated, "Booking details retrieved successfully"),
+    );
+  },
+);
+ 
+// ────────────────────────────────────────────────────────────
+// GET /users/merchant/available-drivers
+//
+// Returns all drivers who are not currently booked.
+// Used by merchant to populate the driver selection modal.
+// ────────────────────────────────────────────────────────────
+export const getAvailableDriversForMerchant = asyncHandler(
+  async (req: Request, res: Response) => {
+    const authResult = await verifyAuthentication(req);
+ 
+    if (authResult.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can access this endpoint");
+    }
+ 
+    // Drivers who are not currently booked and have active status
+    const drivers = await Driver.find({
+      isBooked: { $ne: true },
+      // Add isActive if you have that field: isActive: true
+    }).select(
+      "firstName lastName phoneNumber vehicleInfo rating profileImage isBooked",
+    );
+ 
+    // Double-check: exclude drivers with an active booking in DB
+    // (in case isBooked flag is stale)
+    const busyDriverIds = await Booking.distinct("driver", {
+      status: { $in: ["accepted", "in_progress", "pickup_completed", "en_route_to_dropoff"] },
+      driver: { $exists: true, $ne: null },
+    });
+ 
+    const busySet = new Set(busyDriverIds.map(String));
+    const availableDrivers = drivers.filter((d) => !busySet.has(String(d._id)));
+ 
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          drivers: availableDrivers,
+          total: availableDrivers.length,
+        },
+        `${availableDrivers.length} driver(s) available`,
+      ),
+    );
+  },
+);
+ 

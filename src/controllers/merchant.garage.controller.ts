@@ -952,6 +952,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
     console.log("found garage booking", bookings.length);
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
+      createdAt: booking.createdAt,   
       garage: {
         _id: booking.garageId?._id,
         name: booking.garageId?.garageName,
@@ -1066,4 +1067,80 @@ export const scanBookingQRCode = asyncHandler(async (req: Request, res: Response
   res.status(200).json(
     new ApiResponse(200, formattedData, "Booking data fetched via QR successfully")
   );
+});
+
+
+export const markGarageSlotVacant = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+ 
+    if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can mark a slot vacant");
+    }
+ 
+    const booking = await GarageBooking.findById(bookingId);
+    if (!booking) {
+      throw new ApiError(404, "BOOKING_NOT_FOUND");
+    }
+ 
+    // Must be a paid booking
+    if (booking.paymentDetails.status !== "SUCCESS") {
+      throw new ApiError(400, "Only confirmed (SUCCESS) bookings can be vacated");
+    }
+ 
+    const now = new Date();
+ 
+    // Must still be within the booked period
+    if (new Date(booking.bookingPeriod!.to as unknown as string) <= now) {
+      throw new ApiError(400, "Booking has already expired — slot is already free");
+    }
+ 
+    // Verify the merchant owns the garage this booking belongs to
+    const garage = await Garage.findById(booking.garageId);
+    if (!garage) {
+      throw new ApiError(404, "GARAGE_NOT_FOUND");
+    }
+    if (garage.owner.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, "You do not own this garage");
+    }
+ 
+    // Check if already vacated early
+    if ((booking as any).earlyCheckOut) {
+      throw new ApiError(400, "Slot has already been marked vacant");
+    }
+ 
+    const originalTo = booking.bookingPeriod!.to;
+ 
+    // ✅ Shrink bookingPeriod.to to now → slot freed immediately for new bookings
+    // ✅ Record audit trail in earlyCheckOut
+    await GarageBooking.findByIdAndUpdate(bookingId, {
+      $set: {
+        "bookingPeriod.to": now,
+        earlyCheckOut: {
+          markedAt: now,
+          markedBy: verifiedAuth.user._id,
+          originalTo: originalTo,
+        },
+      },
+    });
+ 
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          bookingId,
+          slot: booking.bookedSlot,
+          markedVacantAt: now,
+          originalCheckOut: originalTo,
+        },
+        "Slot marked vacant successfully. It is now available for new bookings.",
+      ),
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "Invalid booking ID");
+    }
+    throw error;
+  }
 });

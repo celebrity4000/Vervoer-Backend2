@@ -207,7 +207,7 @@ const BookingSchema = new Schema<IBooking>({
     type: Date,
     validate: {
       validator: function(this: IBooking, value: Date) {
-        if (this.scheduledPickupDateTime && value && value <= this.scheduledPickupDateTime) {
+        if (this.scheduledPickupDateTime && value && value >= this.scheduledPickupDateTime) {
           return false;
         }
         return true;

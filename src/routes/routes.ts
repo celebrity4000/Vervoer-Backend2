@@ -13,7 +13,9 @@ import { createPayment } from "../controllers/paymentGatway.controller.js";
 import { isAdmin } from "../middleware/isAdmin.middleware.js";
 import { getCurrentSession } from "../controllers/merchant.controller.js";
 import {PlaceDryCleanerOrder} from "../controllers/DryCleanerBooking.controller.js";
-import {  cancelBooking, cancelBookingRequest, completeTrip, confirmPayment, createBooking, createPaymentIntent, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getBookingDetails, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getOrderReceipt, getUserBookingRequests, getUserBookings, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip, updatePickupAddress,userBokinghistory,generateBookingQRCode, getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, sendTestNotification, deleteAllNotifications, updateBookingStatus, driverCancelBooking, getMerchantBookings } from "../controllers/driverBooking.controller.js";
+import {  cancelBooking, cancelBookingRequest, completeTrip, confirmPayment, createBooking, createPaymentIntent, createScheduledBookingRequest, getActiveBooking, getAvailableDriversForScheduling, getBookingDetails, getDriverBookingHistory, getDriverBookingRequests, getDriverScheduledBookings, getOrderReceipt, getUserBookingRequests, getUserBookings, respondToBookingRequest, setAvailabilityStatus, startScheduledTrip, updatePickupAddress,userBokinghistory,generateBookingQRCode, getUserNotifications, markNotificationAsRead, markAllNotificationsAsRead, sendTestNotification, deleteAllNotifications, updateBookingStatus, driverCancelBooking, getMerchantBookings,merchantBookDeliveryDriver,
+  getMerchantBookingDetails,
+  getAvailableDriversForMerchant, } from "../controllers/driverBooking.controller.js";
 import NodeGeocoder from 'node-geocoder';
 
 const router = Router();
@@ -209,6 +211,9 @@ router.get("/driver/profile", authenticate, getDriverProfile);
 // ==========================================
 // BOOKING ROUTES
 // ==========================================
+router.post("/merchant/book-delivery-driver", authenticate, merchantBookDeliveryDriver);
+router.get("/merchant/bookings/:bookingId", authenticate, getMerchantBookingDetails);
+router.get("/merchant/available-drivers", authenticate, getAvailableDriversForMerchant);
 router.post("/create", createBooking);
 router.get("/my-bookings", authenticate, userBokinghistory);
 router.post("/scheduled-request", createScheduledBookingRequest);

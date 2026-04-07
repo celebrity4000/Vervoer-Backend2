@@ -163,15 +163,6 @@ export const editParkingLot = asyncHandler(
   },
 );
 
-/**
- * Get available spaces for a parking lot.
- *
- * FIX: Added "paymentDetails.status": "SUCCESS" filter.
- * Previously there was NO status filter at all, meaning PENDING and FAILED
- * bookings were counted as occupied slots, blocking users from booking them.
- * Now only confirmed (SUCCESS) bookings are counted as occupied.
- * Also simplified the overlap condition to a single clean $lt/$gt pair.
- */
 export const getAvailableSpace = asyncHandler(async (req, res) => {
   try {
     const startDate = z.iso.datetime().parse(req.query.startDate);
@@ -186,10 +177,6 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
       totalSpace += v.count;
     });
 
-    // ✅ FIX: Only SUCCESS bookings occupy a slot.
-    // PENDING = checkout started but not paid yet (must not block other users)
-    // FAILED  = payment failed (must not block other users)
-    // Single overlap condition: booking starts before query end AND ends after query start
     const result = await LotRentRecordModel.find(
       {
         lotId: lotID,
@@ -235,10 +222,6 @@ const LotCheckOutData = z
   .refine((data) => data.bookingPeriod.from < data.bookingPeriod.to);
 type LotCheckOutData = z.infer<typeof LotCheckOutData>;
 
-/**
- * Check if a specific slot has a conflicting SUCCESS booking.
- * Only SUCCESS bookings count — PENDING and FAILED do not block slots.
- */
 async function findExistingBooking(
   sd: Date | mongoose.Schema.Types.Date,
   ed: Date | mongoose.Schema.Types.Date,
@@ -249,8 +232,6 @@ async function findExistingBooking(
 
   const now = new Date();
 
-  // ✅ FIX: Changed { $ne: "PENDING" } to "SUCCESS" only.
-  // Previously FAILED bookings were blocking slots at checkout time.
   const res = await LotRentRecordModel.find({
     lotId: lotId,
     rentedSlot: rentedSlotId,
@@ -344,6 +325,7 @@ const updateACheckout = async (
       appliedCouponCode: discountPercentage > 0 && data.couponCode,
       amountToPaid: amountToPaid,
       priceRate: rate,
+      vehicleNumber: data.vehicleNumber || null,
       paymentDetails: {
         status: "PENDING",
         amountPaidBy: amountToPaid,
@@ -457,6 +439,7 @@ const createABooking = async (
     appliedCouponCode: discountPercentage > 0 && data.couponCode,
     amountToPaid: amountToPaid,
     priceRate: rate,
+    vehicleNumber: data.vehicleNumber || null,
     paymentDetails: {
       status: "PENDING",
       amountPaidBy: amountToPaid,
@@ -654,8 +637,7 @@ export const getLotBookingById = asyncHandler(
       const verifiedAuth = await verifyAuthentication(req);
       if (verifiedAuth.userType === "driver")
         throw new ApiError(403, "Unauthorize Access");
-      console.log("Requested booking Id:", bookingId);
-      console.log("Requestedby:", verifiedAuth.user);
+
       const booking = await LotRentRecordModel.findById(bookingId)
         .populate<{ lotId: IParking & { owner: IMerchant } }>({
           path: "lotId",
@@ -668,7 +650,7 @@ export const getLotBookingById = asyncHandler(
         })
         .populate<{ renterInfo: IUser }>(
           "renterInfo",
-          "firstName lastName email phoneNumber",
+          "firstName lastName email phoneNumber carLicensePlateImage _id",
         )
         .lean();
 
@@ -676,14 +658,7 @@ export const getLotBookingById = asyncHandler(
         throw new ApiError(404, "Booking not found");
       }
 
-      console.log(booking);
       const parkingLot = await ParkingLotModel.findById(booking.lotId);
-      console.log(
-        booking.renterInfo._id.toString() === verifiedAuth.user._id.toString(),
-      );
-      console.log(
-        booking.lotId.owner.toString() === verifiedAuth.user._id.toString(),
-      );
       if (
         !(
           booking.renterInfo._id.toString() ===
@@ -716,6 +691,7 @@ export const getLotBookingById = asyncHandler(
         },
         type: "L",
         bookedSlot: booking.rentedSlot,
+        vehicleNumber: (booking as any).vehicleNumber || null,
         priceRate: booking.priceRate,
         paymentDetails: {
           totalAmount: booking.totalAmount,
@@ -729,16 +705,14 @@ export const getLotBookingById = asyncHandler(
           paidAt: booking.paymentDetails.paidAt,
         },
         status: booking.paymentDetails.status,
+        // ✅ Expose earlyCheckOut info if it was marked vacant
+        earlyCheckOut: (booking as any).earlyCheckOut || null,
       };
 
       res
         .status(200)
         .json(
-          new ApiResponse(
-            200,
-            response,
-            "Booking details fetched successfully",
-          ),
+          new ApiResponse(200, response, "Booking details fetched successfully"),
         );
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -799,7 +773,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         })
         .populate<{ renterInfo: IUser }>(
           "renterInfo",
-          "firstName lastName email phoneNumber _id",
+          "firstName lastName email phoneNumber carLicensePlateImage _id",
         )
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -808,11 +782,11 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
       LotRentRecordModel.countDocuments(filter),
     ]);
 
-    console.log("Bookings", bookings.length);
     const formattedBookings = bookings.map((booking) => ({
       _id: booking._id,
       parking: {
         _id: booking.lotId?._id.toString(),
+        createdAt: booking.createdAt,
         name: booking.lotId?.parkingName,
         address: booking.lotId?.address,
         contactNumber: booking.lotId?.contactNumber,
@@ -823,8 +797,10 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         name: `${booking.renterInfo?.firstName} ${booking.renterInfo?.lastName || ""}`.trim(),
         email: booking.renterInfo?.email,
         phone: booking.renterInfo?.phoneNumber,
+        carLicensePlateImage: booking.renterInfo?.carLicensePlateImage,
       },
       type: "L",
+      vehicleNumber: (booking as any).vehicleNumber || null,
       bookingPeriod: {
         from: booking.rentFrom,
         to: booking.rentTo,
@@ -844,9 +820,10 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
         paidAt: booking.paymentDetails.paidAt,
       },
       status: booking.paymentDetails.status,
+      // ✅ Expose earlyCheckOut so list screen can show "Vacated Early" badge
+      earlyCheckOut: (booking as any).earlyCheckOut || null,
     }));
 
-    console.log("formatedBooking", formattedBookings);
     res.status(200).json(
       new ApiResponse(
         200,
@@ -873,7 +850,6 @@ export const getListOfParkingLot = asyncHandler(async (req, res) => {
     const owner = z.string().optional().parse(req.query.owner);
     const longitude = z.coerce.number().optional().parse(req.query.longitude);
     const latitude = z.coerce.number().optional().parse(req.query.latitude);
-    console.log(longitude, latitude);
     const queries: mongoose.FilterQuery<IParking> = {};
     if (longitude && latitude) {
       queries.gpsLocation = {
@@ -885,7 +861,6 @@ export const getListOfParkingLot = asyncHandler(async (req, res) => {
         },
       };
     }
-
     if (owner) {
       queries.owner = owner;
     }
@@ -897,7 +872,102 @@ export const getListOfParkingLot = asyncHandler(async (req, res) => {
     if (error instanceof z.ZodError) {
       throw new ApiError(400, "INVALID_QUERY", error.issues);
     } else if (error instanceof ApiError) throw error;
-    console.log(error);
     throw new ApiError(500, "Server Error", error);
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ✅ NEW: markSlotVacant
+//
+// Called by the merchant when a user leaves the parking spot before their
+// booked rentTo time. It does two things:
+//
+//  1. Sets rentTo = now  →  the slot immediately becomes available again for
+//     new bookings (findExistingBooking uses rentTo > now, so this slot is
+//     no longer considered "occupied").
+//
+//  2. Records an earlyCheckOut sub-document with:
+//       - markedAt   : when the merchant pressed the button
+//       - markedBy   : the merchant's _id
+//       - originalTo : the original scheduled checkout time (for audit trail)
+//
+// Security:
+//  - Only a merchant can call this.
+//  - The merchant must own the parking lot that this booking belongs to.
+//  - Only a SUCCESS booking that is still currently active (rentTo > now)
+//    can be vacated. Already-expired or non-SUCCESS bookings are rejected.
+// ─────────────────────────────────────────────────────────────────────────────
+export const markSlotVacant = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+
+    if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can mark a slot vacant");
+    }
+
+    const booking = await LotRentRecordModel.findById(bookingId);
+    if (!booking) {
+      throw new ApiError(404, "BOOKING_NOT_FOUND");
+    }
+
+    // Must be a paid booking
+    if (booking.paymentDetails.status !== "SUCCESS") {
+      throw new ApiError(400, "Only confirmed (SUCCESS) bookings can be vacated");
+    }
+
+    const now = new Date();
+
+    // Must still be within the booked period
+    if (new Date(booking.rentTo as unknown as string) <= now) {
+      throw new ApiError(400, "Booking has already expired — slot is already free");
+    }
+
+    // Verify the merchant owns the parking lot this booking belongs to
+    const parkingLot = await ParkingLotModel.findById(booking.lotId);
+    if (!parkingLot) {
+      throw new ApiError(404, "PARKING_LOT_NOT_FOUND");
+    }
+    if (parkingLot.owner.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, "You do not own this parking lot");
+    }
+
+    // Check if already vacated early
+    if ((booking as any).earlyCheckOut) {
+      throw new ApiError(400, "Slot has already been marked vacant");
+    }
+
+    const originalTo = booking.rentTo;
+
+    // ✅ Core fix: move rentTo to now so the slot is free immediately
+    // ✅ Record audit trail in earlyCheckOut
+    await LotRentRecordModel.findByIdAndUpdate(bookingId, {
+      $set: {
+        rentTo: now,
+        earlyCheckOut: {
+          markedAt: now,
+          markedBy: verifiedAuth.user._id,
+          originalTo: originalTo,
+        },
+      },
+    });
+
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          bookingId,
+          slot: booking.rentedSlot,
+          markedVacantAt: now,
+          originalCheckOut: originalTo,
+        },
+        "Slot marked vacant successfully. It is now available for new bookings.",
+      ),
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "Invalid booking ID");
+    }
+    throw error;
   }
 });

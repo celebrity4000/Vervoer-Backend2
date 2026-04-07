@@ -463,6 +463,7 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
     console.log("found Residence booking:", bookings.length);
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
+      createdAt: booking.createdAt,   
       residence: {
         _id: booking.residenceId?._id,
         name: booking.residenceId?.residenceName,
@@ -507,4 +508,80 @@ export const deleteResidenceBooking = asyncHandler(async (req: Request, res: Res
   if (!booking) throw new ApiError(404, "Booking not found");
   await booking.deleteOne();
   res.status(200).json(new ApiResponse(200, null, "Booking cancelled successfully"));
+});
+
+
+export const markResidenceSlotVacant = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+ 
+    if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can mark a slot vacant");
+    }
+ 
+    const booking = await ResidenceBookingModel.findById(bookingId);
+    if (!booking) {
+      throw new ApiError(404, "BOOKING_NOT_FOUND");
+    }
+ 
+    // Must be a paid booking
+    if (booking.paymentDetails.status !== "SUCCESS") {
+      throw new ApiError(400, "Only confirmed (SUCCESS) bookings can be vacated");
+    }
+ 
+    const now = new Date();
+ 
+    // Must still be within the booked period
+    if (new Date(booking.bookingPeriod.to as unknown as string) <= now) {
+      throw new ApiError(400, "Booking has already expired — slot is already free");
+    }
+ 
+    // Verify the merchant owns the residence this booking belongs to
+    const residence = await ResidenceModel.findById(booking.residenceId);
+    if (!residence) {
+      throw new ApiError(404, "RESIDENCE_NOT_FOUND");
+    }
+    if (residence.owner.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, "You do not own this residence");
+    }
+ 
+    // Check if already vacated early
+    if ((booking as any).earlyCheckOut) {
+      throw new ApiError(400, "Slot has already been marked vacant");
+    }
+ 
+    const originalTo = booking.bookingPeriod.to;
+ 
+    // ✅ Shrink bookingPeriod.to to now → slot freed immediately for new bookings
+    // ✅ Record audit trail in earlyCheckOut
+    await ResidenceBookingModel.findByIdAndUpdate(bookingId, {
+      $set: {
+        "bookingPeriod.to": now,
+        earlyCheckOut: {
+          markedAt: now,
+          markedBy: verifiedAuth.user._id,
+          originalTo: originalTo,
+        },
+      },
+    });
+ 
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        {
+          bookingId,
+          residenceId: booking.residenceId,
+          markedVacantAt: now,
+          originalCheckOut: originalTo,
+        },
+        "Residence marked vacant successfully. It is now available for new bookings.",
+      ),
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      throw new ApiError(400, "Invalid booking ID");
+    }
+    throw error;
+  }
 });
