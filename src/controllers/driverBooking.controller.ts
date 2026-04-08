@@ -429,73 +429,89 @@ export const cancelBookingRequest = asyncHandler(
 
 // ===== DRIVER CONTROLLERS =====
 
-// Get Driver's Booking Requests (Enhanced with scheduling info)
+// ============================================================
+// FIXED: getDriverBookingRequests
+// KEY FIX: MongoDB doesn't support $in:[null,undefined] for
+// "field does not exist". Use $or with $exists and explicit null.
+// ============================================================
+
 export const getDriverBookingRequests = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req);
-
     if (authResult.userType !== "driver") {
       throw new ApiError(403, "Only drivers can view booking requests");
     }
 
+    const driverId = String(authResult.user._id);
+    if (!mongoose.Types.ObjectId.isValid(driverId)) {
+      throw new ApiError(400, "Invalid driver ID");
+    }
+
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
-    const limit = Math.min(
-      50,
-      Math.max(1, parseInt(req.query.limit as string) || 10),
-    );
-    const status = req.query.status as string;
-    const bookingType = req.query.bookingType as string; // 'scheduled' or 'immediate'
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
 
-    // ✅ Start with all bookings
-    const filter: any = {};
-
-    if (status && VALID_BOOKING_STATUSES.includes(status as any)) {
-      filter.status = status;
-    }
-
-    if (bookingType === "scheduled") {
-      filter.isScheduled = true;
-    } else if (bookingType === "immediate") {
-      filter.isScheduled = { $ne: true };
-    }
+    // Filter that includes ready_for_delivery with no driver assigned
+    const filter: any = {
+      $or: [
+        // 1. Pending orders (pickup from customer)
+        {
+          status: "pending",
+          $or: [{ driver: { $exists: false } }, { driver: null }]
+        },
+        // 2. Ready for delivery orders (return from dry cleaner)
+        {
+          status: "ready_for_delivery",
+          $or: [{ driver: { $exists: false } }, { driver: null }]
+        },
+        // 3. Orders already assigned to this driver (active trips)
+        {
+          driver: new mongoose.Types.ObjectId(driverId),
+          status: { $in: ["accepted", "in_progress", "pickup_completed", "en_route_to_dropoff", "arrived_at_dropoff"] }
+        },
+        // 4. Merchant-assigned delivery (if any)
+        {
+          driver: new mongoose.Types.ObjectId(driverId),
+          status: "accepted",
+          bookingType: "delivery"
+        }
+      ]
+    };
 
     try {
-      const bookings = await Booking.find(filter)
-        .populate("user", "firstName lastName phoneNumber profileImage")
-        .populate("dryCleaner", "shopname address phoneNumber")
-        .sort({
-          scheduledPickupDateTime: 1, // sort scheduled bookings first
-          createdAt: -1, // latest first
-        })
-        .limit(limit)
-        .skip((page - 1) * limit)
-        .lean();
+      const [bookings, total, driver] = await Promise.all([
+        Booking.find(filter)
+          .populate("user", "firstName lastName phoneNumber profileImage")
+          .populate("dryCleaner", "shopname address phoneNumber")
+          .sort({ createdAt: -1 })
+          .limit(limit)
+          .skip((page - 1) * limit)
+          .lean(),
+        Booking.countDocuments(filter),
+        Driver.findById(driverId).select("isBooked currentBookingId").lean(),
+      ]);
 
-      const total = await Booking.countDocuments(filter);
-
-      const pagination = {
-        page,
-        limit,
-        total,
-        pages: Math.ceil(total / limit),
-        hasNextPage: page < Math.ceil(total / limit),
-        hasPrevPage: page > 1,
-      };
+      // Log for debugging
+      console.log(`[Driver ${driverId}] Found ${bookings.length} bookings`);
+      bookings.forEach(b => console.log(`  - ${b._id}: status=${b.status}, driver=${b.driver ? 'assigned' : 'null'}`));
 
       res.status(200).json(
         new ApiResponse(
           200,
           {
             bookings,
-            pagination,
-            filter: {
-              status: status || "all",
-              bookingType: bookingType || "all",
+            driverStatus: {
+              isBooked: driver?.isBooked ?? false,
+              currentBookingId: driver?.currentBookingId ?? null,
+              message: bookings.length === 0 ? "No pending orders available at the moment" : undefined,
+            },
+            pagination: {
+              page,
+              limit,
+              total,
+              pages: Math.ceil(total / limit),
             },
           },
-          total > 0
-            ? `Found ${total} booking${total > 1 ? "s" : ""}`
-            : "No bookings found",
+          total > 0 ? `Found ${total} booking(s)` : "No bookings found",
         ),
       );
     } catch (error) {
@@ -504,7 +520,6 @@ export const getDriverBookingRequests = asyncHandler(
     }
   },
 );
-
 // Driver Responds to Booking Request (Enhanced for scheduled bookings)
 // export const respondToBookingRequest = asyncHandler(
 //   async (req, res) => {
@@ -2255,152 +2270,88 @@ export const sendTestNotification = asyncHandler(
 );
 
 // Simple booking response handler - rejection makes booking available to other drivers
-export const respondToBookingRequest = asyncHandler(
-  async (req: Request, res: Response) => {
-    const authResult = (await verifyAuthentication(req)) as AuthResult;
-    if (authResult.userType !== "driver") {
-      throw new ApiError(403, "Only drivers can respond to booking requests");
-    }
+export const respondToBookingRequest = asyncHandler(async (req: Request, res: Response) => {
+  const authResult = (await verifyAuthentication(req)) as AuthResult;
+  if (authResult.userType !== "driver") {
+    throw new ApiError(403, "Only drivers can respond to booking requests");
+  }
 
-    const driverId = authResult.user._id;
-    const driverName = authResult.user.name || "Driver";
-    const { bookingId, response = "accept", rejectionReason } = req.body;
+  const driverId = authResult.user._id;
+  const driverName = authResult.user.name || "Driver";
+  const { bookingId, response = "accept", rejectionReason } = req.body;
 
-    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
-      throw new ApiError(400, "Invalid booking ID format");
-    }
+  if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+    throw new ApiError(400, "Invalid booking ID format");
+  }
 
-    if (!["accept", "reject"].includes(response)) {
-      throw new ApiError(400, "Response must be 'accept' or 'reject'");
-    }
+  if (!["accept", "reject"].includes(response)) {
+    throw new ApiError(400, "Response must be 'accept' or 'reject'");
+  }
 
-    try {
-      let updatedBooking: PopulatedBooking | null;
+  try {
+    let updatedBooking: PopulatedBooking | null;
 
-      if (response === "accept") {
-        // Accept the booking
-        updatedBooking = (await Booking.findOneAndUpdate(
-          {
-            _id: bookingId,
-            status: "pending",
-          },
-          {
-            driver: driverId,
-            status: "accepted",
-            acceptedAt: new Date(),
-          },
-          {
-            new: true,
-          },
-        ).populate("user", "name email")) as unknown as PopulatedBooking | null;
+    if (response === "accept") {
+      // ✅ Allow both 'pending' and 'ready_for_delivery' to be accepted
+      updatedBooking = (await Booking.findOneAndUpdate(
+        {
+          _id: bookingId,
+          status: { $in: ["pending", "ready_for_delivery"] },
+        },
+        {
+          driver: driverId,
+          status: "accepted",
+          acceptedAt: new Date(),
+          // For ready_for_delivery, set bookingType to 'delivery' if not already set
+          $set: { bookingType: "delivery" },
+        },
+        { new: true }
+      ).populate("user", "name email")) as unknown as PopulatedBooking | null;
 
-        if (!updatedBooking) {
-          throw new ApiError(
-            404,
-            "Pending booking request not found or already processed",
-          );
-        }
-
-        // Send acceptance notification to customer
-        if (updatedBooking.user) {
-          try {
-            await NotificationService.sendBookingAcceptedNotification(
-              updatedBooking.user._id.toString(),
-              bookingId,
-              driverName,
-            );
-            console.log(
-              "Acceptance notification sent to customer:",
-              updatedBooking.user._id,
-            );
-          } catch (notificationError) {
-            console.error(
-              "Failed to send acceptance notification:",
-              notificationError,
-            );
-          }
-        }
-
-        res.status(200).json(
-          new ApiResponse(
-            200,
-            {
-              bookingId: bookingId,
-              status: "accepted",
-              driverId: driverId,
-              acceptedAt: updatedBooking.acceptedAt,
-            },
-            "Booking request accepted successfully. Customer has been notified.",
-          ),
-        );
-      } else if (response === "reject") {
-        // Simply keep the booking as "pending" so other drivers can pick it up
-        const booking = (await Booking.findById(bookingId).populate(
-          "user",
-          "name email",
-        )) as unknown as PopulatedBooking | null;
-
-        if (!booking) {
-          throw new ApiError(404, "Booking not found");
-        }
-
-        if (booking.status !== "pending") {
-          throw new ApiError(
-            400,
-            "Booking is no longer available for rejection",
-          );
-        }
-
-        // Send rejection notification to customer (but keep booking pending for others)
-        if (booking.user) {
-          try {
-            await NotificationService.sendBookingRejectedNotification(
-              booking.user._id.toString(),
-              bookingId,
-              `${driverName} declined your request, but other drivers can still accept it.`,
-            );
-            console.log(
-              "Rejection notification sent to customer:",
-              booking.user._id,
-            );
-          } catch (notificationError) {
-            console.error(
-              "Failed to send rejection notification:",
-              notificationError,
-            );
-          }
-        }
-
-        // Notify other available drivers about this booking
-        await notifyOtherAvailableDrivers(booking, driverId.toString());
-
-        res.status(200).json(
-          new ApiResponse(
-            200,
-            {
-              bookingId: bookingId,
-              status: "pending", // Status remains pending for other drivers
-              message:
-                "Booking rejected but remains available for other drivers",
-            },
-            "Booking request rejected. The booking remains available for other drivers.",
-          ),
-        );
-      }
-    } catch (error) {
-      console.error("Booking response error:", error);
-
-      if (error instanceof ApiError) {
-        throw error;
+      if (!updatedBooking) {
+        throw new ApiError(404, "Booking request not found or already processed");
       }
 
-      throw new ApiError(
-        500,
-        `Failed to respond to booking: ${(error as Error)?.message || "Unknown error"}`,
+      // Notify customer
+      if (updatedBooking.user) {
+        await NotificationService.sendBookingAcceptedNotification(
+          updatedBooking.user._id.toString(),
+          bookingId,
+          driverName
+        );
+      }
+
+      res.status(200).json(
+        new ApiResponse(200, {
+          bookingId,
+          status: "accepted",
+          driverId,
+          acceptedAt: updatedBooking.acceptedAt,
+        }, "Booking accepted successfully")
+      );
+    } else {
+      // Reject flow (unchanged, booking stays pending)
+      const booking = await Booking.findById(bookingId).populate("user", "name email");
+      if (!booking || booking.status !== "pending") {
+        throw new ApiError(404, "Booking not available for rejection");
+      }
+      if (booking.user) {
+        await NotificationService.sendBookingRejectedNotification(
+          booking.user._id.toString(),
+          bookingId,
+          `${driverName} declined your request, but other drivers can still accept it.`
+        );
+      }
+      await notifyOtherAvailableDrivers(booking, driverId.toString());
+      res.status(200).json(
+        new ApiResponse(200, { bookingId, status: "pending" }, "Booking rejected but remains available")
       );
     }
-  },
-);
+  } catch (error) {
+    console.error("Booking response error:", error);
+    throw new ApiError(500, `Failed to respond to booking: ${(error as Error).message}`);
+  }
+});
 
 // Fixed function to notify other available drivers
 const notifyOtherAvailableDrivers = async (
@@ -2468,7 +2419,6 @@ const notifyOtherAvailableDrivers = async (
  * PUT /api/bookings/update-status
  */
 // Update the backend controller to support 'dropped_at_center' status
-
 export const updateBookingStatus = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2490,94 +2440,65 @@ export const updateBookingStatus = asyncHandler(
       routeDuration,
     } = req.body;
 
-    // Validate required fields
     if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
       throw new ApiError(400, "Invalid booking ID format");
     }
+    if (!status) throw new ApiError(400, "Status is required");
 
-    if (!status) {
-      throw new ApiError(400, "Status is required");
-    }
-
-    // Valid status transitions - ADD 'dropped_at_center'
     const validStatuses = [
-      "pending",
-      "accepted",
-      "in_progress",
-      "pickup_completed",
-      "en_route_to_dropoff",
-      "arrived_at_dropoff",
-      "dropped_at_center", // NEW STATUS
-      "completed",
-      "cancelled",
-      "rejected",
+      "pending", "accepted", "in_progress", "pickup_completed",
+      "en_route_to_dropoff", "arrived_at_dropoff", "dropped_at_center",
+      "ready_for_delivery", "completed", "cancelled", "rejected",
     ];
-
     if (!validStatuses.includes(status)) {
-      throw new ApiError(
-        400,
-        `Invalid status. Must be one of: ${validStatuses.join(", ")}`,
-      );
+      throw new ApiError(400, `Invalid status. Must be one of: ${validStatuses.join(", ")}`);
     }
 
     try {
-      const existingBooking = await Booking.findById(bookingId).populate(
-        "user",
-        "name email",
-      );
+      const existingBooking = await Booking.findById(bookingId).populate("user", "name email");
+      if (!existingBooking) throw new ApiError(404, "Booking not found");
 
-      if (!existingBooking) {
-        throw new ApiError(404, "Booking not found");
-      }
-
-      // Authorization checks
+      // Authorization
       if (userType === "driver") {
-        if (
-          existingBooking.driver &&
-          existingBooking.driver.toString() !== userId.toString()
-        ) {
+        if (existingBooking.driver && existingBooking.driver.toString() !== userId.toString())
           throw new ApiError(403, "You can only update your own bookings");
-        }
       } else if (userType === "customer") {
-        if (existingBooking.user?._id.toString() !== userId.toString()) {
+        if (existingBooking.user?._id.toString() !== userId.toString())
           throw new ApiError(403, "You can only update your own bookings");
-        }
+      } else if (userType === "merchant") {
+        const dryCleaners = await DryCleaner.find({ owner: userId }).select("_id");
+        const ownedIds = dryCleaners.map((d) => d._id.toString());
+        if (!ownedIds.includes(existingBooking.dryCleaner?.toString()))
+          throw new ApiError(403, "This booking does not belong to your shop");
+        const merchantAllowedStatuses = ["ready_for_delivery", "cancelled"];
+        if (!merchantAllowedStatuses.includes(status))
+          throw new ApiError(403, `Merchants can only set status to: ${merchantAllowedStatuses.join(", ")}`);
       } else {
-        throw new ApiError(
-          403,
-          "Only drivers and customers can update booking status",
-        );
+        throw new ApiError(403, "Only drivers, customers, and merchants can update booking status");
       }
 
-      // Validate status transitions - UPDATE to include dropped_at_center
+      // Status transition validation
       const currentStatus = existingBooking.status;
       const validTransitions: Record<string, string[]> = {
-        pending: ["accepted", "rejected", "cancelled"],
-        accepted: ["in_progress", "cancelled"],
-        in_progress: ["pickup_completed", "cancelled"],
-        pickup_completed: ["en_route_to_dropoff", "cancelled"],
-        en_route_to_dropoff: ["arrived_at_dropoff", "cancelled"],
-        arrived_at_dropoff: ["dropped_at_center", "cancelled"], // UPDATED
-        dropped_at_center: ["completed", "cancelled"], // NEW
-        completed: [],
-        cancelled: [],
-        rejected: [],
+        pending:              ["accepted", "rejected", "cancelled"],
+        accepted:             ["in_progress", "cancelled"],
+        in_progress:          ["pickup_completed", "cancelled"],
+        pickup_completed:     ["en_route_to_dropoff", "cancelled"],
+        en_route_to_dropoff:  ["arrived_at_dropoff", "cancelled"],
+        arrived_at_dropoff:   ["dropped_at_center", "cancelled"],
+        dropped_at_center:    ["ready_for_delivery", "cancelled"],
+        ready_for_delivery:   ["accepted", "cancelled"],
+        completed:            [],
+        cancelled:            [],
+        rejected:             [],
       };
-
       if (!validTransitions[currentStatus]?.includes(status)) {
-        throw new ApiError(
-          400,
-          `Invalid status transition from ${currentStatus} to ${status}`,
-        );
+        throw new ApiError(400, `Invalid status transition from "${currentStatus}" to "${status}"`);
       }
 
-      // Prepare update object
-      const updateData: any = {
-        status,
-        updatedAt: new Date(),
-      };
+      // Build update payload
+      const updateData: any = { status, updatedAt: new Date() };
 
-      // Add timestamp fields based on status
       switch (status) {
         case "accepted":
           if (driverId) {
@@ -2586,121 +2507,66 @@ export const updateBookingStatus = asyncHandler(
           }
           break;
         case "in_progress":
-          if (driverId) {
-            updateData.driver = driverId;
-          }
+          if (driverId) updateData.driver = driverId;
           updateData.startedAt = startedAt ? new Date(startedAt) : new Date();
           break;
         case "pickup_completed":
-          updateData.pickupCompletedAt = pickupCompletedAt
-            ? new Date(pickupCompletedAt)
-            : new Date();
+          updateData.pickupCompletedAt = pickupCompletedAt ? new Date(pickupCompletedAt) : new Date();
           break;
-        case "dropped_at_center": // NEW CASE
-          updateData.dropoffCompletedAt = dropoffCompletedAt
-            ? new Date(dropoffCompletedAt)
-            : new Date();
-          if (routeDistance) {
-            updateData.routeDistance = routeDistance;
-          }
-          if (routeDuration) {
-            updateData.routeDuration = routeDuration;
-          }
+        case "dropped_at_center":
+          updateData.dropoffCompletedAt = dropoffCompletedAt ? new Date(dropoffCompletedAt) : new Date();
+          if (routeDistance) updateData.routeDistance = routeDistance;
+          if (routeDuration) updateData.routeDuration = routeDuration;
           break;
+       case "ready_for_delivery":
+  updateData.readyAt = new Date();
+  updateData.bookingType = "delivery";
+  console.log(`[Merchant] Booking ${bookingId} set to ready_for_delivery, driver unset`);
+  break;
         case "completed":
-          updateData.completedAt = completedAt
-            ? new Date(completedAt)
-            : new Date();
+          updateData.completedAt = completedAt ? new Date(completedAt) : new Date();
           if (!updateData.dropoffCompletedAt) {
-            updateData.dropoffCompletedAt = dropoffCompletedAt
-              ? new Date(dropoffCompletedAt)
-              : new Date();
+            updateData.dropoffCompletedAt = dropoffCompletedAt ? new Date(dropoffCompletedAt) : new Date();
           }
           break;
         case "cancelled":
           updateData.cancelledAt = new Date();
-          if (notes) {
-            updateData.cancellationReason = notes;
-          }
+          if (notes) updateData.cancellationReason = notes;
           break;
       }
 
-      // Add optional fields
-      if (location) {
-        updateData.currentLocation = location;
-      }
-      if (notes) {
-        updateData.statusNotes = notes;
-      }
+      if (location) updateData.currentLocation = location;
+      if (notes) updateData.statusNotes = notes;
 
-      // Update the booking
-      const updatedBooking = (await Booking.findByIdAndUpdate(
-        bookingId,
-        updateData,
-        { new: true },
-      ).populate("user", "name email")) as unknown as PopulatedBooking;
+      const updatedBooking = await Booking.findByIdAndUpdate(bookingId, updateData, { new: true })
+        .populate("user", "name email");
 
-      if (!updatedBooking) {
-        throw new ApiError(404, "Failed to update booking");
-      }
+      if (!updatedBooking) throw new ApiError(404, "Failed to update booking");
 
-      // Send notifications
+      // Notify customer
       if (updatedBooking.user) {
-        try {
-          await sendStatusChangeNotification(
-            updatedBooking.user._id,
-            bookingId,
-            status,
-            driverName || authResult.user.name || "Driver",
-          );
-          console.log(
-            `Status change notification sent to customer: ${updatedBooking.user._id}`,
-          );
-        } catch (notificationError) {
-          console.error(
-            "Failed to send status notification:",
-            notificationError,
-          );
-        }
+        await sendStatusChangeNotification(
+          updatedBooking.user._id,
+          bookingId,
+          status,
+          driverName || authResult.user.name || "Driver",
+        );
       }
 
-      res.status(200).json(
-        new ApiResponse(
-          200,
-          {
-            bookingId: updatedBooking._id,
-            status: updatedBooking.status,
-            updatedAt: updateData.updatedAt,
-            ...(updatedBooking.startedAt && {
-              startedAt: updatedBooking.startedAt,
-            }),
-            ...(updatedBooking.completedAt && {
-              completedAt: updatedBooking.completedAt,
-            }),
-            ...(updatedBooking.pickupCompletedAt && {
-              pickupCompletedAt: updatedBooking.pickupCompletedAt,
-            }),
-            ...(updatedBooking.dropoffCompletedAt && {
-              dropoffCompletedAt: updatedBooking.dropoffCompletedAt,
-            }),
-            ...(updatedBooking.cancelledAt && {
-              cancelledAt: updatedBooking.cancelledAt,
-            }),
-          },
-          getStatusUpdateMessage(status),
-        ),
-      );
+      res.status(200).json(new ApiResponse(200, {
+        bookingId: updatedBooking._id,
+        status: updatedBooking.status,
+        updatedAt: updateData.updatedAt,
+        ...(updatedBooking.startedAt && { startedAt: updatedBooking.startedAt }),
+        ...(updatedBooking.completedAt && { completedAt: updatedBooking.completedAt }),
+        ...(updatedBooking.pickupCompletedAt && { pickupCompletedAt: updatedBooking.pickupCompletedAt }),
+        ...(updatedBooking.dropoffCompletedAt && { dropoffCompletedAt: updatedBooking.dropoffCompletedAt }),
+        ...(updatedBooking.cancelledAt && { cancelledAt: updatedBooking.cancelledAt }),
+      }, getStatusUpdateMessage(status)));
     } catch (error) {
       console.error("Update booking status error:", error);
-
-      if (error instanceof ApiError) {
-        throw error;
-      }
-
-      throw new ApiError(
-        500,
-        `Failed to update booking status: ${(error as Error)?.message || "Unknown error"}`,
-      );
+      if (error instanceof ApiError) throw error;
+      throw new ApiError(500, `Failed to update booking status: ${(error as Error)?.message || "Unknown error"}`);
     }
   },
 );

@@ -290,7 +290,7 @@ router.put('/mark-all-read', markAllNotificationsAsRead);
 router.post('/test', sendTestNotification);
 router.delete('/delete-all', deleteAllNotifications);
 router.put('/update-status', authenticate,updateBookingStatus);
-router.put('/driver-cancel', driverCancelBooking);
+router.put('/driver-cancel',authenticate, driverCancelBooking);
 router.put('/:notificationId/read', markNotificationAsRead);
 
 // ==========================================
