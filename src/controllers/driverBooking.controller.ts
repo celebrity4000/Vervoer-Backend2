@@ -430,9 +430,10 @@ export const cancelBookingRequest = asyncHandler(
 // ===== DRIVER CONTROLLERS =====
 
 // ============================================================
-// FIXED: getDriverBookingRequests
-// KEY FIX: MongoDB doesn't support $in:[null,undefined] for
-// "field does not exist". Use $or with $exists and explicit null.
+// FIX: getDriverBookingRequests
+// KEY FIX: Show ready_for_delivery bookings regardless of
+// driver field state (driver may still be set from previous
+// pickup trip when merchant marks ready_for_delivery).
 // ============================================================
 
 export const getDriverBookingRequests = asyncHandler(
@@ -450,31 +451,44 @@ export const getDriverBookingRequests = asyncHandler(
     const page = Math.max(1, parseInt(req.query.page as string) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit as string) || 20));
 
-    // Filter that includes ready_for_delivery with no driver assigned
+    // ── FIX: ready_for_delivery shown to ALL drivers (no driver filter) ──
+    // When merchant marks order as ready_for_delivery the old driver is
+    // now unset (see updateBookingStatus fix below), but as a safety net
+    // we show ALL ready_for_delivery orders regardless of driver field so
+    // existing bad documents in the DB are also surfaced.
     const filter: any = {
       $or: [
-        // 1. Pending orders (pickup from customer)
+        // 1. Pending orders with no driver assigned (new pickup requests)
         {
           status: "pending",
-          $or: [{ driver: { $exists: false } }, { driver: null }]
+          $or: [{ driver: { $exists: false } }, { driver: null }],
         },
-        // 2. Ready for delivery orders (return from dry cleaner)
+        // 2. Ready for delivery orders – show to ALL drivers (return trip)
+        //    NOTE: driver field is intentionally NOT filtered here so that
+        //    legacy documents (where driver was not unset) still appear.
         {
           status: "ready_for_delivery",
-          $or: [{ driver: { $exists: false } }, { driver: null }]
         },
         // 3. Orders already assigned to this driver (active trips)
         {
           driver: new mongoose.Types.ObjectId(driverId),
-          status: { $in: ["accepted", "in_progress", "pickup_completed", "en_route_to_dropoff", "arrived_at_dropoff"] }
+          status: {
+            $in: [
+              "accepted",
+              "in_progress",
+              "pickup_completed",
+              "en_route_to_dropoff",
+              "arrived_at_dropoff",
+            ],
+          },
         },
-        // 4. Merchant-assigned delivery (if any)
+        // 4. Merchant-assigned delivery for this driver
         {
           driver: new mongoose.Types.ObjectId(driverId),
           status: "accepted",
-          bookingType: "delivery"
-        }
-      ]
+          bookingType: "delivery",
+        },
+      ],
     };
 
     try {
@@ -490,9 +504,12 @@ export const getDriverBookingRequests = asyncHandler(
         Driver.findById(driverId).select("isBooked currentBookingId").lean(),
       ]);
 
-      // Log for debugging
       console.log(`[Driver ${driverId}] Found ${bookings.length} bookings`);
-      bookings.forEach(b => console.log(`  - ${b._id}: status=${b.status}, driver=${b.driver ? 'assigned' : 'null'}`));
+      bookings.forEach((b) =>
+        console.log(
+          `  - ${b._id}: status=${b.status}, driver=${b.driver ? "assigned" : "null"}`,
+        ),
+      );
 
       res.status(200).json(
         new ApiResponse(
@@ -502,7 +519,10 @@ export const getDriverBookingRequests = asyncHandler(
             driverStatus: {
               isBooked: driver?.isBooked ?? false,
               currentBookingId: driver?.currentBookingId ?? null,
-              message: bookings.length === 0 ? "No pending orders available at the moment" : undefined,
+              message:
+                bookings.length === 0
+                  ? "No pending orders available at the moment"
+                  : undefined,
             },
             pagination: {
               page,
@@ -520,185 +540,7 @@ export const getDriverBookingRequests = asyncHandler(
     }
   },
 );
-// Driver Responds to Booking Request (Enhanced for scheduled bookings)
-// export const respondToBookingRequest = asyncHandler(
-//   async (req, res) => {
-//     const authResult = await verifyAuthentication(req);
-//     if (authResult.userType !== "driver") {
-//       throw new ApiError(403, "Only drivers can accept booking requests");
-//     }
 
-//     const driverId = authResult.user._id;
-//     const { bookingId } = req.body;
-
-//     if (!mongoose.Types.ObjectId.isValid(bookingId)) {
-//       throw new ApiError(400, "Invalid booking ID format");
-//     }
-
-//     try {
-//       // Find and update the booking in one operation
-//       const updatedBooking = await Booking.findOneAndUpdate(
-//         {
-//           _id: bookingId,
-//           status: "pending"
-//         },
-//         {
-//           driver: driverId,
-//           status: "accepted",
-//           acceptedAt: new Date()
-//         },
-//         {
-//           new: true // Return the updated document
-//         }
-//       );
-
-//       if (!updatedBooking) {
-//         throw new ApiError(404, "Pending booking request not found or already processed");
-//       }
-
-//       res.status(200).json(
-//         new ApiResponse(
-//           200,
-//           {
-//             bookingId: bookingId,
-//             status: "accepted",
-//             driverId: driverId,
-//             acceptedAt: updatedBooking.acceptedAt
-//           },
-//           "Booking request accepted successfully"
-//         )
-//       );
-
-//     } catch (error: any) {
-//       console.error("Accept booking error:", error);
-
-//       if (error instanceof ApiError) {
-//         throw error;
-//       }
-
-//       throw new ApiError(
-//         500,
-//         `Failed to accept booking: ${error?.message || "Unknown error"}`
-//       );
-//     }
-//   }
-// );
-
-// Additional helper function to get driver requests with better filtering
-// export const getDriverRequests = asyncHandler(
-//   async (req, res) => {
-//     const authResult = await verifyAuthentication(req);
-//     if (authResult.userType !== "driver") {
-//       throw new ApiError(403, "Only drivers can access booking requests");
-//     }
-
-//     const driverId = authResult.user._id;
-
-//     try {
-//       // Find driver to check status and location
-//       const driver = await Driver.findById(driverId)
-//         .populate('userId', 'fullName email phoneNumber');
-
-//       if (!driver) {
-//         throw new ApiError(404, "Driver profile not found");
-//       }
-
-//       // Build query filters
-//       const queryFilters = {
-//         status: "pending", // Only show pending requests
-//       };
-
-//       // If driver is already booked, only show scheduled bookings
-//       if (driver.isBooked) {
-//         queryFilters.isScheduled = true;
-//       }
-
-//       // Optional: Add location-based filtering if driver location is available
-//       // if (driver.currentLocation && driver.currentLocation.coordinates) {
-//       //   queryFilters.location = {
-//       //     $near: {
-//       //       $geometry: driver.currentLocation,
-//       //       $maxDistance: 50000 // 50km radius
-//       //     }
-//       //   };
-//       // }
-
-//       // Fetch available bookings
-//       const bookings = await Booking.find(queryFilters)
-//         .populate('user', 'fullName email phoneNumber')
-//         .populate('dryCleaner', 'shopname address phoneNumber')
-//         .sort({ createdAt: -1 }) // Most recent first
-//         .limit(20); // Limit to prevent overwhelming driver
-
-//       // Transform data for frontend
-//       const transformedBookings = bookings.map((booking, index) => ({
-//         id: booking._id,
-//         name: booking.dryCleaner?.shopname || `Dry Cleaner ${index + 1}`,
-//         icon: 'laundry',
-//         pickup: booking.pickupAddress || 'Pickup address not specified',
-//         dropOff: booking.dropoffAddress || 'Drop-off address not specified',
-//         miles: `${booking.distance || 0} miles`,
-//         time: `${booking.time || 0} min`,
-//         price: `${(booking.price || 0).toFixed(2)}`,
-//         status: booking.status,
-//         orderNumber: booking.orderNumber,
-//         trackingId: booking.Tracking_ID,
-//         user: {
-//           id: booking.user?._id,
-//           name: booking.user?.fullName,
-//           phone: booking.user?.phoneNumber,
-//           email: booking.user?.email
-//         },
-//         dryCleaner: {
-//           id: booking.dryCleaner?._id,
-//           name: booking.dryCleaner?.shopname,
-//           address: booking.dryCleaner?.address,
-//           phone: booking.dryCleaner?.phoneNumber
-//         },
-//         scheduledPickup: booking.scheduledPickupDateTime,
-//         scheduledDelivery: booking.scheduledDeliveryDateTime,
-//         createdAt: booking.createdAt,
-//         isScheduled: booking.isScheduled,
-//         priority: booking.priority || 'normal'
-//       }));
-
-//       // Send response
-//       res.status(200).json(
-//         new ApiResponse(
-//           200,
-//           {
-//             bookings: transformedBookings,
-//             driverStatus: {
-//               isBooked: driver.isBooked,
-//               currentBookingId: driver.currentBookingId,
-//               isVerified: driver.isVerified,
-//               canAcceptNewBookings: !driver.isBooked || driver.canAcceptScheduled
-//             },
-//             totalAvailable: transformedBookings.length,
-//             message: transformedBookings.length === 0 ?
-//               (driver.isBooked ?
-//                 "No new scheduled requests available. Complete current booking to see immediate requests." :
-//                 "No booking requests available at the moment."
-//               ) : undefined
-//           },
-//           "Driver requests fetched successfully"
-//         )
-//       );
-
-//     } catch (error) {
-//       console.error("Get driver requests error:", error);
-
-//       if (error instanceof ApiError) {
-//         throw error;
-//       }
-
-//       throw new ApiError(
-//         500,
-//         `Failed to fetch driver requests: ${error?.message || "Unknown error"}`
-//       );
-//     }
-//   }
-// );
 // Get Driver's Scheduled Bookings for Today/Upcoming
 export const getDriverScheduledBookings = asyncHandler(
   async (req: Request, res: Response) => {
@@ -989,7 +831,6 @@ export const getActiveBooking = asyncHandler(
   },
 );
 
-// Rest of the existing functions remain the same...
 export const setAvailabilityStatus = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req);
@@ -1171,7 +1012,6 @@ export const createBooking = asyncHandler(
         orderNumber,
       } = req.body;
 
-      // Enhanced validation with specific error messages
       console.log("🔍 Validating fields:", {
         hasDryCleaner: !!dryCleaner,
         hasPickupAddress: !!pickupAddress,
@@ -1286,17 +1126,14 @@ export const createBooking = asyncHandler(
         console.error("Duplicate key pattern:", error.keyPattern);
       }
 
-      // Re-throw ApiErrors as-is
       if (error instanceof ApiError) {
         throw error;
       }
 
-      // Handle MongoDB duplicate key error
       if (error.code === 11000) {
         throw new ApiError(400, "Duplicate order number or tracking ID");
       }
 
-      // Handle validation errors
       if (error.name === "ValidationError") {
         const validationMessages = Object.values(error.errors).map(
           (err: any) => err.message,
@@ -1315,7 +1152,6 @@ export const createBooking = asyncHandler(
 /* ------------------------------------------------------------------ */
 export const createPaymentIntent = asyncHandler(
   async (req: Request, res: Response) => {
-    // ✅ ADD: Log Stripe key mode at the start
     console.log("🔑 ============================================");
     console.log("🔑 STRIPE KEY MODE CHECK:");
     console.log(
@@ -1406,7 +1242,6 @@ export const createPaymentIntent = asyncHandler(
       throw new ApiError(500, "Failed to create payment customer");
     }
 
-    // Create payment intent
     console.log("💳 Creating payment intent with:", {
       amount: Math.round(amount),
       currency,
@@ -1426,7 +1261,6 @@ export const createPaymentIntent = asyncHandler(
       description: `Order ${orderNumber || booking.orderNumber} - Dry cleaning service`,
     });
 
-    // ✅ CORRECT VALIDATION: Check format, not length
     console.log("🔍 Client Secret Validation:");
     console.log("   Value:", paymentIntent.client_secret);
     console.log("   Length:", paymentIntent.client_secret?.length);
@@ -1444,10 +1278,8 @@ export const createPaymentIntent = asyncHandler(
       throw new ApiError(500, "Payment intent missing client_secret");
     }
 
-    // ✅ FIXED: Only check format, not length
     if (!paymentIntent.client_secret.includes("_secret_")) {
       console.error('❌ Client secret does not contain "_secret_"');
-      console.error("Value:", paymentIntent.client_secret);
       throw new ApiError(
         500,
         "Payment intent client_secret is in wrong format",
@@ -1456,33 +1288,24 @@ export const createPaymentIntent = asyncHandler(
 
     if (!paymentIntent.client_secret.startsWith("pi_")) {
       console.error('❌ Client secret does not start with "pi_"');
-      console.error("Value:", paymentIntent.client_secret);
       throw new ApiError(
         500,
         "Payment intent client_secret has invalid prefix",
       );
     }
 
-    // ❌ REMOVE THIS CHECK - It's wrong!
-    // if (paymentIntent.client_secret.length < 100) {
-    //   throw new ApiError(500, "client_secret too short");
-    // }
-
     console.log("✅ Client secret validation PASSED");
 
-    // Create ephemeral key
     const ephemeralKey = await stripe.ephemeralKeys.create(
       { customer: customer.id },
       { apiVersion: "2024-06-20" },
     );
 
-    // Update booking
     await Booking.findByIdAndUpdate(bookingId, {
       paymentIntentId: paymentIntent.id,
       paymentStatus: "pending",
     });
 
-    // Prepare response
     const responseData = {
       paymentIntent: paymentIntent.client_secret,
       ephemeralKey: ephemeralKey.secret,
@@ -1490,7 +1313,6 @@ export const createPaymentIntent = asyncHandler(
       paymentIntentId: paymentIntent.id,
     };
 
-    // ✅ FIXED VALIDATION: Only check format
     console.log("📤 Response Validation:");
     console.log("   Has Payment Intent:", !!responseData.paymentIntent);
     console.log(
@@ -1594,7 +1416,6 @@ export const getUserBookings = asyncHandler(
 
     const { status, page = "1", limit = "10" } = req.query;
 
-    /* ---- now totally type-safe ---- */
     const currentPage = parseInt(toString(page), 10);
     const pageSize = parseInt(toString(limit), 10);
     const skip = (currentPage - 1) * pageSize;
@@ -1656,7 +1477,6 @@ export const getBookingDetails = asyncHandler(
     } else if (authResult.userType === "merchant") {
       console.log("Searching as MERCHANT");
 
-      // FIX: merchant → owner
       const dryCleaners = await DryCleaner.find({
         owner: authResult.user._id,
       }).select("_id");
@@ -1712,85 +1532,12 @@ export const getBookingDetails = asyncHandler(
   },
 );
 
-/* ------------------------------------------------------------------ */
-// export const cancelBooking = asyncHandler(async (req: Request, res: Response) => {
-//   const authResult = await verifyAuthentication(req);
-//   if (authResult.userType !== "user") {
-//     throw new ApiError(403, "Only users can cancel their bookings");
-//   }
-
-//   const { bookingId } = req.params;
-//   const { cancellationReason } = req.body;
-
-//   if (!bookingId) {
-//     throw new ApiError(400, "Booking ID is required");
-//   }
-
-//   const booking = await Booking.findOne({
-//     _id: bookingId,
-//     user: authResult.user._id,
-//   });
-
-//   if (!booking) {
-//     throw new ApiError(404, "Booking not found");
-//   }
-
-//   if (booking.status === "completed") {
-//     throw new ApiError(400, "Cannot cancel completed booking");
-//   }
-
-//   if (booking.status === "cancelled") {
-//     throw new ApiError(400, "Booking is already cancelled");
-//   }
-
-//   let refundProcessed = false;
-//   if (booking.paymentStatus === "paid" && booking.paymentIntentId) {
-//     try {
-//       const refund = await stripe.refunds.create({
-//         payment_intent: booking.paymentIntentId,
-//         reason: "requested_by_customer",
-//       });
-
-//       if (refund.status === "succeeded") {
-//         refundProcessed = true;
-//       }
-//     } catch (refundError: any) {
-//       console.error("Error processing refund:", refundError);
-//     }
-//   }
-
-//   const updatedBooking = await Booking.findByIdAndUpdate(
-//     bookingId,
-//     {
-//       status: "cancelled",
-//       cancelledAt: new Date(),
-//       cancellationReason: cancellationReason || "Cancelled by user",
-//       paymentStatus: refundProcessed ? "refunded" : booking.paymentStatus,
-//     },
-//     { new: true }
-//   ).populate("dryCleaner", "shopname address phoneNumber");
-
-//   res.status(200).json(
-//     new ApiResponse(
-//       200,
-//       { booking: updatedBooking, refundProcessed },
-//       refundProcessed
-//         ? "Booking cancelled successfully and refund processed"
-//         : "Booking cancelled successfully"
-//     )
-//   );
-// });
-
 export const getOrderReceipt = asyncHandler(
   async (req: Request, res: Response) => {
-    // FIX 1: Use orderId from params, not bookingId
     const { orderId } = req.params;
 
-    // FIX 2: Use the correct field for querying
-    // Based on your booking creation, you should query by orderNumber or _id
     let booking;
 
-    // Try to find by MongoDB ObjectId first
     if (orderId.match(/^[0-9a-fA-F]{24}$/)) {
       booking = await Booking.findById(orderId)
         .populate("dryCleaner", "shopname address phoneNumber")
@@ -1798,7 +1545,6 @@ export const getOrderReceipt = asyncHandler(
         .lean();
     }
 
-    // If not found by ID, try by orderNumber (like #OC3913 or DCS937576722)
     if (!booking) {
       const orderNumber = orderId.startsWith("#")
         ? orderId.substring(1)
@@ -1815,12 +1561,11 @@ export const getOrderReceipt = asyncHandler(
       throw new ApiError(404, "Booking not found");
     }
 
-    // FIX 3: Map the data structure correctly to match frontend expectations
     const receipt = {
-      orderId: `#${booking.orderNumber}`, // Frontend expects #OC3913 format
+      orderId: `#${booking.orderNumber}`,
       trackingId:
-        (booking as any).trackingId || (booking as any).Tracking_ID || "N/A", // Handle any field name variations
-      totalAmount: `${booking.pricing.totalAmount.toFixed(2)}`, // Format as currency
+        (booking as any).trackingId || (booking as any).Tracking_ID || "N/A",
+      totalAmount: `${booking.pricing.totalAmount.toFixed(2)}`,
       paymentMessage: `We wish to inform you that $${booking.pricing.totalAmount} has been debited from your ${booking.paymentMethod || "Debit"} Card ending with 1234 on ${new Date(
         booking.paidAt || booking.createdAt,
       )
@@ -1867,7 +1612,6 @@ export const updatePickupAddress = asyncHandler(
     const { bookingId } = req.params;
     const { pickupAddress } = req.body;
 
-    // Access user from your authUser structure
     const authUser = req.authUser;
 
     if (!authUser) {
@@ -1875,7 +1619,6 @@ export const updatePickupAddress = asyncHandler(
       return;
     }
 
-    // Only allow 'user' type to update pickup address
     if (authUser.userType !== "user") {
       res
         .status(403)
@@ -1905,7 +1648,6 @@ export const updatePickupAddress = asyncHandler(
     );
 
     try {
-      // Find booking and ensure it belongs to the authenticated user
       const booking = await Booking.findOne({
         _id: bookingId,
         user: userId,
@@ -1929,7 +1671,6 @@ export const updatePickupAddress = asyncHandler(
         return;
       }
 
-      // Check if within 2 hours of booking creation
       const now = new Date();
       const allowedUntil = new Date(
         booking.createdAt.getTime() + 2 * 60 * 60 * 1000,
@@ -1948,7 +1689,6 @@ export const updatePickupAddress = asyncHandler(
         return;
       }
 
-      // Update the pickup address
       booking.pickupAddress = pickupAddress;
       await booking.save();
 
@@ -1973,7 +1713,6 @@ export const updatePickupAddress = asyncHandler(
 
 export const userBokinghistory = asyncHandler(
   async (req: Request, res: Response): Promise<void> => {
-    // Access user from your authUser structure
     const authUser = req.authUser;
 
     if (!authUser) {
@@ -1983,7 +1722,6 @@ export const userBokinghistory = asyncHandler(
       return;
     }
 
-    // Only allow 'user' type to access booking history
     if (authUser.userType !== "user") {
       res
         .status(403)
@@ -2000,7 +1738,6 @@ export const userBokinghistory = asyncHandler(
     const userId = authUser.user._id;
 
     try {
-      // Convert userId to ObjectId for MongoDB query
       const userObjectId = new mongoose.Types.ObjectId(userId);
 
       const bookings = await Booking.find({ user: userObjectId })
@@ -2105,7 +1842,7 @@ interface PopulatedBooking extends mongoose.Document {
   dropoffCompletedAt?: Date;
   pickup?: string;
   dropOff?: string;
-  deliveryCharge?: number; // Fixed: Changed from string to number to match IBooking
+  deliveryCharge?: number;
   miles?: string;
   time?: string;
   paymentStatus?: string;
@@ -2134,7 +1871,6 @@ type NotificationType =
   | "payment"
   | "general";
 
-// Helper function to safely parse query parameters
 const parseQueryParam = (param: any, defaultValue: number): number => {
   if (typeof param === "string") {
     const parsed = parseInt(param, 10);
@@ -2180,9 +1916,6 @@ export const getUserNotifications = asyncHandler(
   },
 );
 
-/**
- * Mark notification as read
- */
 export const markNotificationAsRead = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2204,9 +1937,6 @@ export const markNotificationAsRead = asyncHandler(
   },
 );
 
-/**
- * Mark all notifications as read
- */
 export const markAllNotificationsAsRead = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2220,15 +1950,11 @@ export const markAllNotificationsAsRead = asyncHandler(
   },
 );
 
-/**
- * Delete notification
- */
 export const deleteAllNotifications = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
     const userId = authResult.user._id;
 
-    // Call your service method to delete all notifications for this user
     await NotificationService.deleteAllNotifications(userId.toString());
 
     res
@@ -2239,9 +1965,6 @@ export const deleteAllNotifications = asyncHandler(
   },
 );
 
-/**
- * Send test notification (for development)
- */
 export const sendTestNotification = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2269,7 +1992,7 @@ export const sendTestNotification = asyncHandler(
   },
 );
 
-// Simple booking response handler - rejection makes booking available to other drivers
+// Simple booking response handler
 export const respondToBookingRequest = asyncHandler(async (req: Request, res: Response) => {
   const authResult = (await verifyAuthentication(req)) as AuthResult;
   if (authResult.userType !== "driver") {
@@ -2292,7 +2015,6 @@ export const respondToBookingRequest = asyncHandler(async (req: Request, res: Re
     let updatedBooking: PopulatedBooking | null;
 
     if (response === "accept") {
-      // ✅ Allow both 'pending' and 'ready_for_delivery' to be accepted
       updatedBooking = (await Booking.findOneAndUpdate(
         {
           _id: bookingId,
@@ -2302,7 +2024,6 @@ export const respondToBookingRequest = asyncHandler(async (req: Request, res: Re
           driver: driverId,
           status: "accepted",
           acceptedAt: new Date(),
-          // For ready_for_delivery, set bookingType to 'delivery' if not already set
           $set: { bookingType: "delivery" },
         },
         { new: true }
@@ -2312,7 +2033,6 @@ export const respondToBookingRequest = asyncHandler(async (req: Request, res: Re
         throw new ApiError(404, "Booking request not found or already processed");
       }
 
-      // Notify customer
       if (updatedBooking.user) {
         await NotificationService.sendBookingAcceptedNotification(
           updatedBooking.user._id.toString(),
@@ -2330,7 +2050,6 @@ export const respondToBookingRequest = asyncHandler(async (req: Request, res: Re
         }, "Booking accepted successfully")
       );
     } else {
-      // Reject flow (unchanged, booking stays pending)
       const booking = await Booking.findById(bookingId).populate("user", "name email");
       if (!booking || booking.status !== "pending") {
         throw new ApiError(404, "Booking not available for rejection");
@@ -2353,32 +2072,29 @@ export const respondToBookingRequest = asyncHandler(async (req: Request, res: Re
   }
 });
 
-// Fixed function to notify other available drivers
 const notifyOtherAvailableDrivers = async (
   booking: PopulatedBooking,
   excludeDriverId: string,
 ) => {
   try {
-    // Find all active drivers except the one who just rejected
     const availableDrivers = await User.find({
       userType: "driver",
       isActive: true,
       isAvailable: true,
-      _id: { $ne: excludeDriverId }, // Exclude the driver who just rejected
+      _id: { $ne: excludeDriverId },
     });
 
     console.log(
       `Found ${availableDrivers.length} other available drivers for booking ${booking._id}`,
     );
 
-    // Send notifications to available drivers
     const notificationPromises = availableDrivers.map(async (driver: any) => {
       try {
         await NotificationService.createNotification({
           userId: driver._id.toString(),
           title: "Booking Available",
           message: `A dry cleaning pickup is available: ${booking.pickup || "Location"} - ${booking.deliveryCharge || "22.30"}`,
-          type: "general" as NotificationType, // Changed from 'booking_available' to 'general'
+          type: "general" as NotificationType,
           priority: "high",
           data: {
             bookingId: booking._id.toString(),
@@ -2414,11 +2130,11 @@ const notifyOtherAvailableDrivers = async (
   }
 };
 
-/**
- * Update booking status - matches your existing controller pattern
- * PUT /api/bookings/update-status
- */
-// Update the backend controller to support 'dropped_at_center' status
+// ================================================================
+// updateBookingStatus
+// KEY FIX: When status becomes "ready_for_delivery", $unset the
+// driver field so any driver can pick up the return delivery.
+// ================================================================
 export const updateBookingStatus = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2485,7 +2201,7 @@ export const updateBookingStatus = asyncHandler(
         in_progress:          ["pickup_completed", "cancelled"],
         pickup_completed:     ["en_route_to_dropoff", "cancelled"],
         en_route_to_dropoff:  ["arrived_at_dropoff", "cancelled"],
-        arrived_at_dropoff:   ["dropped_at_center", "cancelled"],
+        arrived_at_dropoff:   ["dropped_at_center", "completed", "cancelled"],  
         dropped_at_center:    ["ready_for_delivery", "cancelled"],
         ready_for_delivery:   ["accepted", "cancelled"],
         completed:            [],
@@ -2496,50 +2212,79 @@ export const updateBookingStatus = asyncHandler(
         throw new ApiError(400, `Invalid status transition from "${currentStatus}" to "${status}"`);
       }
 
-      // Build update payload
-      const updateData: any = { status, updatedAt: new Date() };
+      // Build $set payload
+      const setData: any = { status, updatedAt: new Date() };
+      // Tracks whether we need to $unset the driver field
+      let shouldUnsetDriver = false;
 
       switch (status) {
         case "accepted":
           if (driverId) {
-            updateData.driver = driverId;
-            updateData.acceptedAt = new Date();
+            setData.driver = driverId;
+            setData.acceptedAt = new Date();
           }
           break;
         case "in_progress":
-          if (driverId) updateData.driver = driverId;
-          updateData.startedAt = startedAt ? new Date(startedAt) : new Date();
+          if (driverId) setData.driver = driverId;
+          setData.startedAt = startedAt ? new Date(startedAt) : new Date();
           break;
         case "pickup_completed":
-          updateData.pickupCompletedAt = pickupCompletedAt ? new Date(pickupCompletedAt) : new Date();
+          setData.pickupCompletedAt = pickupCompletedAt
+            ? new Date(pickupCompletedAt)
+            : new Date();
           break;
         case "dropped_at_center":
-          updateData.dropoffCompletedAt = dropoffCompletedAt ? new Date(dropoffCompletedAt) : new Date();
-          if (routeDistance) updateData.routeDistance = routeDistance;
-          if (routeDuration) updateData.routeDuration = routeDuration;
+          setData.dropoffCompletedAt = dropoffCompletedAt
+            ? new Date(dropoffCompletedAt)
+            : new Date();
+          if (routeDistance) setData.routeDistance = routeDistance;
+          if (routeDuration) setData.routeDuration = routeDuration;
           break;
-       case "ready_for_delivery":
-  updateData.readyAt = new Date();
-  updateData.bookingType = "delivery";
-  console.log(`[Merchant] Booking ${bookingId} set to ready_for_delivery, driver unset`);
-  break;
+
+        // ── KEY FIX ──────────────────────────────────────────────────────
+        // Merchant marks order as ready for return delivery.
+        // Unset the driver so the order appears as a fresh pickup
+        // for any available driver in getDriverBookingRequests.
+        case "ready_for_delivery":
+          setData.readyAt = new Date();
+          setData.bookingType = "delivery";
+          shouldUnsetDriver = true; // will add $unset below
+          console.log(
+            `[Merchant] Booking ${bookingId} → ready_for_delivery. Unsetting driver field.`,
+          );
+          break;
+        // ─────────────────────────────────────────────────────────────────
+
         case "completed":
-          updateData.completedAt = completedAt ? new Date(completedAt) : new Date();
-          if (!updateData.dropoffCompletedAt) {
-            updateData.dropoffCompletedAt = dropoffCompletedAt ? new Date(dropoffCompletedAt) : new Date();
+          setData.completedAt = completedAt
+            ? new Date(completedAt)
+            : new Date();
+          if (!setData.dropoffCompletedAt) {
+            setData.dropoffCompletedAt = dropoffCompletedAt
+              ? new Date(dropoffCompletedAt)
+              : new Date();
           }
           break;
         case "cancelled":
-          updateData.cancelledAt = new Date();
-          if (notes) updateData.cancellationReason = notes;
+          setData.cancelledAt = new Date();
+          if (notes) setData.cancellationReason = notes;
           break;
       }
 
-      if (location) updateData.currentLocation = location;
-      if (notes) updateData.statusNotes = notes;
+      if (location) setData.currentLocation = location;
+      if (notes) setData.statusNotes = notes;
 
-      const updatedBooking = await Booking.findByIdAndUpdate(bookingId, updateData, { new: true })
-        .populate("user", "name email");
+      // Build final Mongoose update – conditionally add $unset
+      const mongoUpdate: any = { $set: setData };
+      if (shouldUnsetDriver) {
+        mongoUpdate.$unset = { driver: "" };
+      }
+
+      const updatedBooking = await Booking.findByIdAndUpdate(
+        bookingId,
+        mongoUpdate,
+        { new: true },
+      ).populate("user", "name email");
 
       if (!updatedBooking) throw new ApiError(404, "Failed to update booking");
 
@@ -2553,45 +2298,33 @@ export const updateBookingStatus = asyncHandler(
         );
       }
 
-      res.status(200).json(new ApiResponse(200, {
-        bookingId: updatedBooking._id,
-        status: updatedBooking.status,
-        updatedAt: updateData.updatedAt,
-        ...(updatedBooking.startedAt && { startedAt: updatedBooking.startedAt }),
-        ...(updatedBooking.completedAt && { completedAt: updatedBooking.completedAt }),
-        ...(updatedBooking.pickupCompletedAt && { pickupCompletedAt: updatedBooking.pickupCompletedAt }),
-        ...(updatedBooking.dropoffCompletedAt && { dropoffCompletedAt: updatedBooking.dropoffCompletedAt }),
-        ...(updatedBooking.cancelledAt && { cancelledAt: updatedBooking.cancelledAt }),
-      }, getStatusUpdateMessage(status)));
+      res.status(200).json(
+        new ApiResponse(
+          200,
+          {
+            bookingId: updatedBooking._id,
+            status: updatedBooking.status,
+            updatedAt: setData.updatedAt,
+            ...(updatedBooking.startedAt && { startedAt: updatedBooking.startedAt }),
+            ...(updatedBooking.completedAt && { completedAt: updatedBooking.completedAt }),
+            ...(updatedBooking.pickupCompletedAt && { pickupCompletedAt: updatedBooking.pickupCompletedAt }),
+            ...(updatedBooking.dropoffCompletedAt && { dropoffCompletedAt: updatedBooking.dropoffCompletedAt }),
+            ...(updatedBooking.cancelledAt && { cancelledAt: updatedBooking.cancelledAt }),
+          },
+          getStatusUpdateMessage(status),
+        ),
+      );
     } catch (error) {
       console.error("Update booking status error:", error);
       if (error instanceof ApiError) throw error;
-      throw new ApiError(500, `Failed to update booking status: ${(error as Error)?.message || "Unknown error"}`);
+      throw new ApiError(
+        500,
+        `Failed to update booking status: ${(error as Error)?.message || "Unknown error"}`,
+      );
     }
   },
 );
 
-// Helper function to get status messages
-// function getStatusUpdateMessage(status: string): string {
-//   const messages: Record<string, string> = {
-//     'pending': 'Booking is pending',
-//     'accepted': 'Booking accepted successfully',
-//     'in_progress': 'Trip started',
-//     'pickup_completed': 'Items picked up successfully',
-//     'en_route_to_dropoff': 'En route to dropoff location',
-//     'arrived_at_dropoff': 'Arrived at dropoff location',
-//     'dropped_at_center': 'Items dropped at dry cleaning center',
-//     'completed': 'Booking completed successfully',
-//     'cancelled': 'Booking cancelled',
-//     'rejected': 'Booking rejected'
-//   };
-
-//   return messages[status] || 'Status updated';
-// }
-
-/**
- * Send status change notification - uses your existing NotificationService pattern
- */
 const sendStatusChangeNotification = async (
   userId: mongoose.Types.ObjectId,
   bookingId: string,
@@ -2602,7 +2335,6 @@ const sendStatusChangeNotification = async (
 
   if (!notificationData) return;
 
-  // Check if you have specific notification methods like in your existing code
   if (
     status === "accepted" &&
     typeof NotificationService.sendBookingAcceptedNotification === "function"
@@ -2622,7 +2354,6 @@ const sendStatusChangeNotification = async (
       driverName,
     );
   } else {
-    // Use generic createNotification method
     await NotificationService.createNotification({
       userId: userId.toString(),
       title: notificationData.title,
@@ -2639,9 +2370,6 @@ const sendStatusChangeNotification = async (
   }
 };
 
-/**
- * Get notification data for status
- */
 const getNotificationForStatus = (status: string, driverName: string) => {
   const notifications: Record<
     string,
@@ -2701,9 +2429,6 @@ const getNotificationForStatus = (status: string, driverName: string) => {
   return notifications[status] || null;
 };
 
-/**
- * Get success message for status update
- */
 function getStatusUpdateMessage(status: string): string {
   const messages: Record<string, string> = {
     pending: "Booking is pending",
@@ -2713,6 +2438,7 @@ function getStatusUpdateMessage(status: string): string {
     en_route_to_dropoff: "En route to dropoff location",
     arrived_at_dropoff: "Arrived at dropoff location",
     dropped_at_center: "Items dropped at dry cleaning center",
+    ready_for_delivery: "Order is ready for delivery. Driver has been unassigned.",
     completed: "Booking completed successfully",
     cancelled: "Booking cancelled",
     rejected: "Booking rejected",
@@ -2721,10 +2447,6 @@ function getStatusUpdateMessage(status: string): string {
   return messages[status] || "Status updated";
 }
 
-/**
- * Cancel booking by driver - for when driver cancels after accepting
- * PUT /api/bookings/driver-cancel
- */
 export const driverCancelBooking = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2753,7 +2475,6 @@ export const driverCancelBooking = asyncHandler(
         throw new ApiError(404, "Booking not found or not assigned to you");
       }
 
-      // Check if booking can be cancelled by driver
       if (["completed", "cancelled"].includes(existingBooking.status)) {
         throw new ApiError(
           400,
@@ -2761,10 +2482,9 @@ export const driverCancelBooking = asyncHandler(
         );
       }
 
-      // Make available to other drivers instead of cancelling
       const updateData = {
-        status: "pending", // Make it available again
-        driver: null, // Remove current driver assignment
+        status: "pending",
+        driver: null,
         cancelledAt: new Date(),
         cancellationReason:
           cancellationReason || "Driver cancelled - now available for others",
@@ -2777,7 +2497,6 @@ export const driverCancelBooking = asyncHandler(
         { new: true },
       ).populate("user", "name email")) as unknown as PopulatedBooking;
 
-      // Send notification to customer
       if (updatedBooking?.user) {
         try {
           await NotificationService.createNotification({
@@ -2806,7 +2525,6 @@ export const driverCancelBooking = asyncHandler(
         }
       }
 
-      // Notify other available drivers about this booking
       await notifyOtherAvailableDrivers(updatedBooking, driverId.toString());
 
       res.status(200).json(
@@ -2836,9 +2554,6 @@ export const driverCancelBooking = asyncHandler(
   },
 );
 
-/**
- * User cancel booking with refund processing
- */
 export const cancelBooking = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = (await verifyAuthentication(req)) as AuthResult;
@@ -2873,18 +2588,9 @@ export const cancelBooking = asyncHandler(
 
     let refundProcessed = false;
 
-    // Process refund if payment was made
     if (booking.paymentStatus === "paid" && booking.paymentIntentId) {
       try {
-        // Uncomment when you have Stripe configured
-        // const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
-        // const refund = await stripe.refunds.create({
-        //   payment_intent: booking.paymentIntentId,
-        //   reason: "requested_by_customer",
-        // });
-        // if (refund.status === "succeeded") {
-        //   refundProcessed = true;
-        // }
+        // Stripe refund logic here if needed
       } catch (refundError: any) {
         console.error("Error processing refund:", refundError);
       }
@@ -2897,7 +2603,7 @@ export const cancelBooking = asyncHandler(
         cancelledAt: new Date(),
         cancellationReason: cancellationReason || "Cancelled by user",
         paymentStatus: refundProcessed ? "refunded" : booking.paymentStatus,
-        driver: null, // Remove driver assignment if any
+        driver: null,
       },
       { new: true },
     ).populate("dryCleaner", "shopname address phoneNumber");
@@ -2916,12 +2622,10 @@ export const cancelBooking = asyncHandler(
   },
 );
 
-// Add this to your merchant controller file
 export const getMerchantBookings = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req);
 
-    // Check if user is a merchant
     if (authResult.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can view their bookings");
     }
@@ -2935,26 +2639,14 @@ export const getMerchantBookings = asyncHandler(
     console.log("=== DEBUG: Merchant Bookings ===");
     console.log("Merchant ID:", authResult.user._id);
 
-    // DEBUG: Check all dry cleaners in database
     const allDryCleaners = await DryCleaner.find({}).limit(5);
     console.log("Total dry cleaners in DB:", await DryCleaner.countDocuments());
-    if (allDryCleaners.length > 0) {
-      console.log(
-        "Sample dry cleaner structure:",
-        JSON.stringify(allDryCleaners[0], null, 2),
-      );
-    }
 
-    // Try multiple field variations to find the correct one
     const byMerchant = await DryCleaner.find({ merchant: authResult.user._id });
     const byOwner = await DryCleaner.find({ owner: authResult.user._id });
-    const byMerchantId = await DryCleaner.find({
-      merchantId: authResult.user._id,
-    });
+    const byMerchantId = await DryCleaner.find({ merchantId: authResult.user._id });
     const byUserId = await DryCleaner.find({ userId: authResult.user._id });
-    const byCreatedBy = await DryCleaner.find({
-      createdBy: authResult.user._id,
-    });
+    const byCreatedBy = await DryCleaner.find({ createdBy: authResult.user._id });
 
     console.log("Found by merchant field:", byMerchant.length);
     console.log("Found by owner field:", byOwner.length);
@@ -2962,7 +2654,6 @@ export const getMerchantBookings = asyncHandler(
     console.log("Found by userId field:", byUserId.length);
     console.log("Found by createdBy field:", byCreatedBy.length);
 
-    // Use the field that returned results (adjust based on your schema)
     let dryCleaners = byMerchant;
     if (byOwner.length > 0) dryCleaners = byOwner;
     else if (byMerchantId.length > 0) dryCleaners = byMerchantId;
@@ -2992,7 +2683,6 @@ export const getMerchantBookings = asyncHandler(
       return;
     }
 
-    // Query for bookings where dryCleaner is in the merchant's shops
     const query: any = { dryCleaner: { $in: dryCleanerIds } };
 
     if (status) {
@@ -3033,8 +2723,6 @@ export const getMerchantBookings = asyncHandler(
   },
 );
 
-
-
 async function assertMerchantOwnsBooking(
   bookingId: string,
   merchantId: string,
@@ -3043,43 +2731,35 @@ async function assertMerchantOwnsBooking(
     "user",
     "firstName lastName phoneNumber email",
   );
- 
+
   if (!booking) throw new ApiError(404, "Booking not found");
- 
-  // Find all dry cleaners owned by this merchant
+
   const dryCleaners = await DryCleaner.find({ owner: merchantId }).select("_id");
   const ownedIds = dryCleaners.map((d) => d._id.toString());
- 
+
   if (!ownedIds.includes(booking.dryCleaner.toString())) {
     throw new ApiError(403, "This booking does not belong to your shop");
   }
- 
+
   return booking as any;
 }
- 
-// ────────────────────────────────────────────────────────────
-// POST /users/merchant/book-delivery-driver
-//
-// Merchant selects a driver to deliver cleaned items to
-// the customer's address.
-// ────────────────────────────────────────────────────────────
+
 export const merchantBookDeliveryDriver = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req);
- 
+
     if (authResult.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can book delivery drivers");
     }
- 
+
     const merchantId = String(authResult.user._id);
     const {
       bookingId,
       driverId,
-      pickupAddress,   // dry cleaner address (items being collected FROM here)
-      dropoffAddress,  // customer's address (deliver TO here)
+      pickupAddress,
+      dropoffAddress,
     } = req.body;
- 
-    // ── Validation ──────────────────────────────
+
     if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
       throw new ApiError(400, "Invalid booking ID");
     }
@@ -3089,17 +2769,15 @@ export const merchantBookDeliveryDriver = asyncHandler(
     if (!pickupAddress || !dropoffAddress) {
       throw new ApiError(400, "Pickup and dropoff addresses are required");
     }
- 
+
     const session = await mongoose.startSession();
- 
+
     try {
       let updatedBooking: any = null;
- 
+
       await session.withTransaction(async () => {
-        // ── 1. Verify merchant owns this booking ──
         const booking = await assertMerchantOwnsBooking(bookingId, merchantId);
- 
-        // ── 2. Check booking status allows driver booking ──
+
         const allowedStatuses = ["dropped_at_center", "ready_for_delivery"];
         if (!allowedStatuses.includes(booking.status)) {
           throw new ApiError(
@@ -3108,40 +2786,35 @@ export const merchantBookDeliveryDriver = asyncHandler(
             `Allowed statuses: ${allowedStatuses.join(", ")}`,
           );
         }
- 
-        // ── 3. Check driver exists and is available ──
+
         const driver = await Driver.findById(driverId).session(session);
         if (!driver) throw new ApiError(404, "Driver not found");
- 
+
         if (driver.isBooked) {
           throw new ApiError(400, "Selected driver is currently busy. Please choose another driver.");
         }
- 
-        // ── 4. Check driver has no conflicting active booking ──
+
         const activeBooking = await Booking.findOne({
           driver: driverId,
           status: { $in: ["accepted", "in_progress", "pickup_completed", "en_route_to_dropoff"] },
         }).session(session);
- 
+
         if (activeBooking) {
           throw new ApiError(
             400,
             "This driver already has an active booking. Please choose another driver.",
           );
         }
- 
-        // ── 5. Update the existing booking with the delivery driver ──
+
         updatedBooking = await Booking.findByIdAndUpdate(
           bookingId,
           {
             driver: driverId,
-            status: "accepted",          // Driver accepted the return delivery
-            pickupAddress: pickupAddress, // From dry cleaner
-            dropoffAddress: dropoffAddress, // To customer
+            status: "accepted",
+            pickupAddress: pickupAddress,
+            dropoffAddress: dropoffAddress,
             bookingType: "delivery",
             acceptedAt: new Date(),
-            // Mark that this is a merchant-initiated return delivery
-            // so the driver app knows where to pick up from
             $set: {
               "metadata.isReturnDelivery": true,
               "metadata.merchantInitiated": true,
@@ -3153,25 +2826,22 @@ export const merchantBookDeliveryDriver = asyncHandler(
           .populate("user", "firstName lastName phoneNumber email")
           .populate("dryCleaner", "shopname address phoneNumber")
           .populate("driver", "firstName lastName phoneNumber vehicleInfo");
- 
+
         if (!updatedBooking) {
           throw new ApiError(500, "Failed to update booking");
         }
- 
-        // ── 6. Mark driver as booked ──
+
         await Driver.findByIdAndUpdate(
           driverId,
           { isBooked: true },
           { session },
         );
       });
- 
+
       await session.commitTransaction();
- 
-      // ── 7. Send notifications (outside transaction) ──
+
       if (updatedBooking) {
         try {
-          // Notify the driver about the new pickup task
           const driverUser = await Driver.findById(driverId);
           if (driverUser) {
             await NotificationService.createNotification({
@@ -3191,8 +2861,7 @@ export const merchantBookDeliveryDriver = asyncHandler(
               },
             });
           }
- 
-          // Notify the customer their order is on the way
+
           if (updatedBooking.user) {
             await NotificationService.createNotification({
               userId: updatedBooking.user._id.toString(),
@@ -3211,11 +2880,10 @@ export const merchantBookDeliveryDriver = asyncHandler(
             });
           }
         } catch (notifError) {
-          // Notifications are non-critical; log but don't fail
           console.error("Failed to send notifications:", notifError);
         }
       }
- 
+
       res.status(200).json(
         new ApiResponse(
           200,
@@ -3235,74 +2903,57 @@ export const merchantBookDeliveryDriver = asyncHandler(
     }
   },
 );
- 
-// ────────────────────────────────────────────────────────────
-// GET /users/merchant/bookings/:bookingId
-//
-// Merchant fetches full details of one of their orders.
-// (Reuses the existing getBookingDetails but provides a
-//  merchant-scoped alias with a cleaner URL.)
-// ────────────────────────────────────────────────────────────
+
 export const getMerchantBookingDetails = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req);
- 
+
     if (authResult.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can access this endpoint");
     }
- 
+
     const { bookingId } = req.params;
- 
+
     if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
       throw new ApiError(400, "Invalid booking ID");
     }
- 
+
     const merchantId = String(authResult.user._id);
     const booking = await assertMerchantOwnsBooking(bookingId, merchantId);
- 
+
     const populated = await Booking.findById(booking._id)
       .populate("user", "firstName lastName phoneNumber email")
       .populate("dryCleaner", "shopname address phoneNumber")
       .populate("driver", "firstName lastName phoneNumber vehicleInfo rating");
- 
+
     res.status(200).json(
       new ApiResponse(200, populated, "Booking details retrieved successfully"),
     );
   },
 );
- 
-// ────────────────────────────────────────────────────────────
-// GET /users/merchant/available-drivers
-//
-// Returns all drivers who are not currently booked.
-// Used by merchant to populate the driver selection modal.
-// ────────────────────────────────────────────────────────────
+
 export const getAvailableDriversForMerchant = asyncHandler(
   async (req: Request, res: Response) => {
     const authResult = await verifyAuthentication(req);
- 
+
     if (authResult.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can access this endpoint");
     }
- 
-    // Drivers who are not currently booked and have active status
+
     const drivers = await Driver.find({
       isBooked: { $ne: true },
-      // Add isActive if you have that field: isActive: true
     }).select(
       "firstName lastName phoneNumber vehicleInfo rating profileImage isBooked",
     );
- 
-    // Double-check: exclude drivers with an active booking in DB
-    // (in case isBooked flag is stale)
+
     const busyDriverIds = await Booking.distinct("driver", {
       status: { $in: ["accepted", "in_progress", "pickup_completed", "en_route_to_dropoff"] },
       driver: { $exists: true, $ne: null },
     });
- 
+
     const busySet = new Set(busyDriverIds.map(String));
     const availableDrivers = drivers.filter((d) => !busySet.has(String(d._id)));
- 
+
     res.status(200).json(
       new ApiResponse(
         200,
@@ -3315,4 +2966,3 @@ export const getAvailableDriversForMerchant = asyncHandler(
     );
   },
 );
- 
