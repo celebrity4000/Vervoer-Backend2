@@ -542,5 +542,95 @@ export const getDryCleanerServices = asyncHandler(
   }
 );
 
-
+const addServiceSchema = z.object({
+  name: z.string().min(1, "Service name is required"),
+  category: z.string().min(1, "Category is required"),
+  strachLevel: z.number().min(1).max(5).optional().default(1),
+  washOnly: z.boolean().optional().default(false),
+  additionalservice: z.enum(["zipper", "button", "wash/fold"]).optional(),
+  price: z.number().min(0.01, "Price must be greater than 0"),
+});
+ 
+export const addDryCleanerService = asyncHandler(
+  async (req: Request, res: Response) => {
+    const dryCleanerId = req.params.dryCleanerId;
+    const { authUser } = req as any;
+ 
+    if (authUser.userType !== "merchant") {
+      throw new ApiError(403, "Unauthorized access");
+    }
+ 
+    const rData = addServiceSchema.parse(req.body);
+ 
+    const dryCleaner = await DryCleaner.findById(dryCleanerId);
+    if (!dryCleaner) {
+      throw new ApiError(404, "Dry Cleaner not found");
+    }
+ 
+    if (dryCleaner.owner.toString() !== authUser.user._id.toString()) {
+      throw new ApiError(403, "Unauthorized to edit this Dry Cleaner");
+    }
+ 
+    // Push the new service into the services subdocument array
+    dryCleaner.services.push({
+      name: rData.name,
+      category: rData.category,
+      strachLevel: rData.strachLevel ?? 1,
+      washOnly: rData.washOnly ?? false,
+      additionalservice: rData.additionalservice,
+      price: rData.price,
+    } as any);
+ 
+    await dryCleaner.save();
+ 
+    res.status(201).json(
+      new ApiResponse(201, { dryCleaner }, "Service added successfully.")
+    );
+  }
+);
+ 
+// ── Delete Service ────────────────────────────────────────────────────────────
+// DELETE /edit-service-drycleaner/:dryCleanerId/delete
+ 
+const deleteServiceSchema = z.object({
+  serviceId: z.string().min(1, "Service ID is required"),
+});
+ 
+export const deleteDryCleanerService = asyncHandler(
+  async (req: Request, res: Response) => {
+    const dryCleanerId = req.params.dryCleanerId;
+    const { authUser } = req as any;
+ 
+    if (authUser.userType !== "merchant") {
+      throw new ApiError(403, "Unauthorized access");
+    }
+ 
+    const rData = deleteServiceSchema.parse(req.body);
+ 
+    const dryCleaner = await DryCleaner.findById(dryCleanerId);
+    if (!dryCleaner) {
+      throw new ApiError(404, "Dry Cleaner not found");
+    }
+ 
+    if (dryCleaner.owner.toString() !== authUser.user._id.toString()) {
+      throw new ApiError(403, "Unauthorized to edit this Dry Cleaner");
+    }
+ 
+    const serviceIndex = dryCleaner.services.findIndex(
+      (s: any) => s._id.toString() === rData.serviceId
+    );
+ 
+    if (serviceIndex === -1) {
+      throw new ApiError(404, "Service not found");
+    }
+ 
+    dryCleaner.services.splice(serviceIndex, 1);
+    await dryCleaner.save();
+ 
+    res.status(200).json(
+      new ApiResponse(200, { dryCleaner }, "Service deleted successfully.")
+    );
+  }
+);
+ 
 

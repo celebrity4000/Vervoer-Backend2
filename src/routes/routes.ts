@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { registerUser, verifyOtp,socialRegister, loginUser ,logoutUser,sendForgotPasswordOtp,verifyForgotPasswordOtpHandler,resetForgottenPassword,updateBankDetails,resetUserPassword, uploadProfileImage, editUserProfile, getUserProfile, deleteAccount,getBankDetails} from "../controllers/User.js";  
 import { asyncHandler } from "../utils/asynchandler.js";
-import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners ,getownDrycleaner ,deleteOwnDryCleaner, getDryCleanerServices} from "../controllers/merchant.drycleaner.controller.js";
+import { registerDryCleaner, updateDryCleanerProfile,editDryCleanerAddress,editDryCleanerService,editDryCleanerHours,updateDryCleanerShopImages,deleteDryCleanerShopImage,getAllDryCleaners ,getownDrycleaner ,deleteOwnDryCleaner, getDryCleanerServices, addDryCleanerService, deleteDryCleanerService} from "../controllers/merchant.drycleaner.controller.js";
 
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { authenticate } from "../middleware/auth.middleware.js";
@@ -194,6 +194,8 @@ router.post("/place-drycleaner-order", authenticate, PlaceDryCleanerOrder);
 router.put("/update-drycleaner-shop-images/:id", authenticate, imageUploadFields, updateDryCleanerShopImages);
 router.delete("/delete-drycleaner-shop-image/:id", authenticate, deleteDryCleanerShopImage);
 router.get("/dry-cleaner", getAllDryCleaners);
+router.post("/edit-service-drycleaner/:dryCleanerId/add", authenticate, addDryCleanerService);
+router.delete("/edit-service-drycleaner/:dryCleanerId/delete", authenticate, deleteDryCleanerService);
 
 // ==========================================
 // DRIVER ROUTES
