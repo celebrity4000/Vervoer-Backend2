@@ -1,4 +1,4 @@
-import { Request, Response ,NextFunction} from "express";
+import { Request, Response, NextFunction } from "express";
 import { ApiError } from "../utils/apierror.js";
 import z from "zod";
 import { ApiResponse } from "../utils/apirespone.js";
@@ -7,7 +7,6 @@ import { DryCleaner } from "../models/merchant.model.js";
 import uploadToCloudinary from "../utils/cloudinary.js";
 import { jwtEncode } from "../utils/jwt.js";
 import { IMerchant } from "../models/merchant.model.js";
-import { verifyAuthentication } from "../middleware/verifyAuthhentication.js";
 import mongoose from "mongoose";
 
 const addressSchema = z.object({
@@ -21,7 +20,7 @@ const addressSchema = z.object({
 // Dry cleaner validation schema
 const dryCleanerSchema = z.object({
   shopname: z.string(),
-  address: addressSchema,  
+  address: addressSchema,
   rating: z.coerce.number().optional(),
   about: z.string().optional(),
   contactPerson: z.string(),
@@ -37,7 +36,7 @@ const dryCleanerSchema = z.object({
     z.object({
       name: z.string(),
       category: z.string(),
-      strachLevel: z.union([z.string(), z.number()]).optional(),
+      starchLevel: z.enum(["low", "medium", "high"]).optional(), // ✅ fixed
       washOnly: z.coerce.boolean().optional(),
       additionalservice: z.enum(["zipper", "button", "wash/fold"]).optional(),
       price: z.coerce.number().optional(),
@@ -53,7 +52,6 @@ export const registerDryCleaner = asyncHandler(
       throw new ApiError(403, "Unauthorized access");
     }
 
-    // Parse JSON strings from multipart/form-data fields if needed
     const parseIfString = (field: any) =>
       typeof field === "string" ? JSON.parse(field) : field;
 
@@ -105,15 +103,8 @@ export const registerDryCleaner = asyncHandler(
   }
 );
 
+// ── Contact Person Edit ───────────────────────────────────────────────────────
 
-
-
-
-
-
-
-
-// contactperon edit
 const DryCleanerUpdateSchema = z.object({
   contactPerson: z.string().optional(),
   phoneNumber: z.string().optional(),
@@ -138,10 +129,8 @@ export const updateDryCleanerProfile = asyncHandler(
       throw new ApiError(403, "Unauthorized to edit this dry cleaner");
     }
 
-    // Validate body fields
     const rData = DryCleanerUpdateSchema.parse(req.body);
 
-    // Upload image if present
     let contactPersonImgUrl: string | undefined;
     if (req.files && "contactPersonImg" in req.files) {
       const file = (req.files as any).contactPersonImg[0];
@@ -149,7 +138,6 @@ export const updateDryCleanerProfile = asyncHandler(
       contactPersonImgUrl = result.secure_url;
     }
 
-    // Update only provided fields
     if (rData.contactPerson) dryCleaner.contactPerson = rData.contactPerson;
     if (rData.phoneNumber) dryCleaner.phoneNumber = rData.phoneNumber;
     if (contactPersonImgUrl) dryCleaner.contactPersonImg = contactPersonImgUrl;
@@ -162,8 +150,8 @@ export const updateDryCleanerProfile = asyncHandler(
   }
 );
 
+// ── Edit Dry Cleaner Address ──────────────────────────────────────────────────
 
-// Edit dry cleaner address
 const addressSchemas = z.object({
   street: z.string(),
   city: z.string(),
@@ -175,7 +163,7 @@ const addressSchemas = z.object({
 const dryCleanerEditSchema = z.object({
   shopname: z.string().optional(),
   about: z.string().optional(),
-  address: addressSchemas.optional(), 
+  address: addressSchemas.optional(),
 });
 
 export const editDryCleanerAddress = asyncHandler(
@@ -200,7 +188,8 @@ export const editDryCleanerAddress = asyncHandler(
 
     if (rData.shopname) dryCleaner.shopname = rData.shopname;
     if (rData.about) dryCleaner.about = rData.about;
-    if (rData.address) dryCleaner.address = rData.address;  
+    if (rData.address) dryCleaner.address = rData.address;
+
     await dryCleaner.save();
 
     res.status(200).json(
@@ -209,18 +198,17 @@ export const editDryCleanerAddress = asyncHandler(
   }
 );
 
+// ── Edit Dry Cleaner Service ──────────────────────────────────────────────────
 
-// dry clearner service
- const serviceEditSchema = z.object({
+const serviceEditSchema = z.object({
   serviceId: z.string(),
   name: z.string().optional(),
   category: z.string().optional(),
-  strachLevel: z.number().min(1).max(5).optional(),
+  starchLevel: z.enum(["low", "medium", "high"]).optional(), // ✅ fixed
   washOnly: z.boolean().optional(),
   additionalservice: z.enum(["zipper", "button", "wash/fold"]).optional(),
   price: z.number().optional(),
 });
-
 
 export const editDryCleanerService = asyncHandler(async (req: Request, res: Response) => {
   const dryCleanerId = req.params.dryCleanerId;
@@ -254,7 +242,7 @@ export const editDryCleanerService = asyncHandler(async (req: Request, res: Resp
 
   if (rData.name) service.name = rData.name;
   if (rData.category) service.category = rData.category;
-  if (rData.strachLevel) service.strachLevel = rData.strachLevel;
+  if (rData.starchLevel) service.starchLevel = rData.starchLevel; // ✅ fixed
   if (typeof rData.washOnly === "boolean") service.washOnly = rData.washOnly;
   if (rData.additionalservice) service.additionalservice = rData.additionalservice;
   if (rData.price) service.price = rData.price;
@@ -266,8 +254,8 @@ export const editDryCleanerService = asyncHandler(async (req: Request, res: Resp
   );
 });
 
+// ── Edit Dry Cleaner Hours ────────────────────────────────────────────────────
 
-// dry cleaner hours of operation
 const hoursArraySchema = z.array(
   z.object({
     day: z.string(),
@@ -275,7 +263,6 @@ const hoursArraySchema = z.array(
     close: z.string(),
   })
 );
-
 
 export const editDryCleanerHours = asyncHandler(async (req: Request, res: Response) => {
   const dryCleanerId = req.params.dryCleanerId;
@@ -296,8 +283,10 @@ export const editDryCleanerHours = asyncHandler(async (req: Request, res: Respon
     throw new ApiError(403, "Unauthorized to edit this Dry Cleaner");
   }
 
-  rDataArray.forEach(rData => {
-    const opHour = dryCleaner.hoursOfOperation.find(op => op.day && op.day === rData.day);
+  rDataArray.forEach((rData) => {
+    const opHour = dryCleaner.hoursOfOperation.find(
+      (op) => op.day && op.day === rData.day
+    );
     if (opHour) {
       opHour.open = rData.open;
       opHour.close = rData.close;
@@ -313,9 +302,8 @@ export const editDryCleanerHours = asyncHandler(async (req: Request, res: Respon
   );
 });
 
+// ── Update Shop Images ────────────────────────────────────────────────────────
 
-
-// shop imgage update
 export const updateDryCleanerShopImages = asyncHandler(
   async (req: Request, res: Response) => {
     const dryCleanerId = req.params.id;
@@ -345,12 +333,7 @@ export const updateDryCleanerShopImages = asyncHandler(
       uploadedUrls.push(result.secure_url);
     }
 
-    // Replace all existing shop images
-    // dryCleaner.shopimage = uploadedUrls;
-
-    // Append new images to existing ones
     dryCleaner.shopimage.push(...uploadedUrls);
-
 
     await dryCleaner.save();
 
@@ -360,8 +343,8 @@ export const updateDryCleanerShopImages = asyncHandler(
   }
 );
 
+// ── Delete Shop Image ─────────────────────────────────────────────────────────
 
-// delete shop image
 export const deleteDryCleanerShopImage = asyncHandler(
   async (req: Request, res: Response) => {
     const dryCleanerId = req.params.id;
@@ -381,13 +364,11 @@ export const deleteDryCleanerShopImage = asyncHandler(
       throw new ApiError(403, "Unauthorized to edit this dry cleaner");
     }
 
-    // Check if image exists in the array
     const index = dryCleaner.shopimage.indexOf(imageUrl);
     if (index === -1) {
       throw new ApiError(404, "Image not found in shopimage array");
     }
 
-    // Remove the image URL from the array
     dryCleaner.shopimage.splice(index, 1);
 
     await dryCleaner.save();
@@ -398,37 +379,37 @@ export const deleteDryCleanerShopImage = asyncHandler(
   }
 );
 
+// ── Get All Dry Cleaners ──────────────────────────────────────────────────────
 
-// get all dry cleaner
 export const getAllDryCleaners = asyncHandler(
   async (req: Request, res: Response) => {
     const dryCleaners = await DryCleaner.find().select("-orders");
-    
+
     if (!dryCleaners || dryCleaners.length === 0) {
       throw new ApiError(404, "No dry cleaners found");
     }
-    
+
     res.status(200).json(
       new ApiResponse(200, { dryCleaners }, "All dry cleaners fetched successfully.")
     );
   }
 );
 
-// merchant get it's own dry cleaner
+// ── Merchant Get Own Dry Cleaner ──────────────────────────────────────────────
+
 export const getownDrycleaner = asyncHandler(async (req: Request, res: Response) => {
   const { authUser } = req as any;
 
-  console.log('Authenticated User:', authUser);
+  console.log("Authenticated User:", authUser);
 
   if (!authUser || authUser.userType !== "merchant") {
     throw new ApiError(403, "Unauthorized access");
   }
 
   try {
-    // FIX HERE -> authUser.user._id
     const dryCleaners = await DryCleaner.find({ owner: authUser.user._id }).select("-orders");
 
-    console.log('Found Dry Cleaners:', dryCleaners.length);
+    console.log("Found Dry Cleaners:", dryCleaners.length);
 
     res.status(200).json(
       new ApiResponse(
@@ -440,56 +421,13 @@ export const getownDrycleaner = asyncHandler(async (req: Request, res: Response)
       )
     );
   } catch (error) {
-    console.error('Error fetching dry cleaners:', error);
+    console.error("Error fetching dry cleaners:", error);
     throw new ApiError(500, "Failed to fetch dry cleaners");
   }
 });
 
-// order by the user
-const orderSchema = z.object({
-  serviceName: z.string(),
-  quantity: z.number().min(1),
-  price: z.number().min(0),
-});
+// ── Delete Own Dry Cleaner ────────────────────────────────────────────────────
 
-// export const placeOrderToDryCleaner = asyncHandler(
-//   async (req: Request, res: Response) => {
-//     const { authUser } = req as any;
-
-//     if (authUser.userType !== "user") {
-//       throw new ApiError(403, "Only users can place orders.");
-//     }
-
-//     const dryCleanerId = req.params.dryCleanerId;
-
-//     // Validate request body
-//     const rData = orderSchema.parse(req.body);
-
-//     const dryCleaner = await DryCleaner.findById(dryCleanerId);
-//     if (!dryCleaner) {
-//       throw new ApiError(404, "Dry cleaner not found");
-//     }
-
-//     const newOrder = {
-//       serviceName: rData.serviceName,
-//       quantity: rData.quantity,
-//       price: rData.price,
-//       status: "active",
-//     };
-
-//     dryCleaner.orders.push(newOrder);
-//     await dryCleaner.save();
-
-//     res.status(201).json(
-//       new ApiResponse(201, { dryCleaner }, "Order placed successfully.")
-//     );
-//   }
-// );
-
-
-
-
-// delete own dry cleaner
 export const deleteOwnDryCleaner = asyncHandler(async (req: Request, res: Response) => {
   const { authUser } = req as any;
   const dryCleanerId = req.params.id;
@@ -498,139 +436,159 @@ export const deleteOwnDryCleaner = asyncHandler(async (req: Request, res: Respon
     throw new ApiError(400, "Invalid Dry Cleaner ID");
   }
 
-  // Ensure user is authenticated and is a merchant
   if (!authUser || authUser.userType !== "merchant") {
     throw new ApiError(403, "Unauthorized access");
   }
 
-  // Find the Dry Cleaner with the given ID and owned by this merchant
   const dryCleaner = await DryCleaner.findOne({
     _id: dryCleanerId,
-    owner: authUser.user._id  // Ensure ownership
+    owner: authUser.user._id,
   });
 
   if (!dryCleaner) {
     throw new ApiError(404, "Dry Cleaner not found or you don't have permission to delete it");
   }
 
-  // Delete the Dry Cleaner
   await dryCleaner.deleteOne();
 
   res.status(200).json(new ApiResponse(200, null, "Dry Cleaner deleted successfully"));
 });
 
+// ── Get Dry Cleaner Services ──────────────────────────────────────────────────
 
-// service dry cleaner
 export const getDryCleanerServices = asyncHandler(
   async (req: Request, res: Response) => {
     const { dryCleanerId } = req.params;
 
-    // Find dry cleaner by ID
     const dryCleaner = await DryCleaner.findById(dryCleanerId).select("services");
 
     if (!dryCleaner) {
       throw new ApiError(404, "Dry cleaner not found");
     }
 
+    // ✅ Defensive transform — convert any old numeric starchLevel to string
+    const starchMap: { [key: number]: string } = {
+      1: "low", 2: "low", 3: "medium", 4: "high", 5: "high",
+    };
+
+    const services = dryCleaner.services.map((s: any) => {
+      const sObj = s.toObject();
+      if (typeof sObj.starchLevel === "number") {
+        sObj.starchLevel = starchMap[sObj.starchLevel] || "medium";
+      }
+      return sObj;
+    });
+
     res.status(200).json(
-      new ApiResponse(
-        200,
-        dryCleaner.services,
-        "Dry cleaner services fetched successfully"
-      )
+      new ApiResponse(200, services, "Dry cleaner services fetched successfully")
     );
   }
 );
 
+// ── Add Dry Cleaner Service ───────────────────────────────────────────────────
+
 const addServiceSchema = z.object({
   name: z.string().min(1, "Service name is required"),
   category: z.string().min(1, "Category is required"),
-  strachLevel: z.number().min(1).max(5).optional().default(1),
-  washOnly: z.boolean().optional().default(false),
-  additionalservice: z.enum(["zipper", "button", "wash/fold"]).optional(),
-  price: z.number().min(0.01, "Price must be greater than 0"),
+  starchLevel: z.enum(["low", "medium", "high"]).optional().default("medium"), // ✅ fixed
+  washOnly: z.coerce.boolean().optional().default(false),
+  additionalservice: z
+    .string()
+    .transform((v) => (v.trim() === "" ? undefined : v.trim()))
+    .pipe(z.enum(["zipper", "button", "wash/fold"]).optional())
+    .optional(),
+  price: z.coerce.number().min(0.01, "Price must be greater than 0"),
 });
- 
+
 export const addDryCleanerService = asyncHandler(
   async (req: Request, res: Response) => {
     const dryCleanerId = req.params.dryCleanerId;
     const { authUser } = req as any;
- 
+
     if (authUser.userType !== "merchant") {
       throw new ApiError(403, "Unauthorized access");
     }
- 
-    const rData = addServiceSchema.parse(req.body);
- 
+
+    console.log("Add service body:", req.body);
+
+    let rData;
+    try {
+      rData = addServiceSchema.parse(req.body);
+    } catch (zodError: any) {
+      console.error("Zod validation error:", JSON.stringify(zodError.errors, null, 2));
+      throw new ApiError(
+        400,
+        `Validation failed: ${zodError.errors.map((e: any) => e.message).join(", ")}`
+      );
+    }
+
     const dryCleaner = await DryCleaner.findById(dryCleanerId);
     if (!dryCleaner) {
       throw new ApiError(404, "Dry Cleaner not found");
     }
- 
+
     if (dryCleaner.owner.toString() !== authUser.user._id.toString()) {
       throw new ApiError(403, "Unauthorized to edit this Dry Cleaner");
     }
- 
-    // Push the new service into the services subdocument array
+
     dryCleaner.services.push({
       name: rData.name,
       category: rData.category,
-      strachLevel: rData.strachLevel ?? 1,
+      starchLevel: rData.starchLevel ?? "medium", // ✅ fixed
       washOnly: rData.washOnly ?? false,
-      additionalservice: rData.additionalservice,
+      additionalservice: rData.additionalservice as any,
       price: rData.price,
     } as any);
- 
+
     await dryCleaner.save();
- 
+
+    console.log("Service added successfully:", rData.name);
+
     res.status(201).json(
       new ApiResponse(201, { dryCleaner }, "Service added successfully.")
     );
   }
 );
- 
-// ── Delete Service ────────────────────────────────────────────────────────────
-// DELETE /edit-service-drycleaner/:dryCleanerId/delete
- 
+
+// ── Delete Dry Cleaner Service ────────────────────────────────────────────────
+
 const deleteServiceSchema = z.object({
   serviceId: z.string().min(1, "Service ID is required"),
 });
- 
+
 export const deleteDryCleanerService = asyncHandler(
   async (req: Request, res: Response) => {
     const dryCleanerId = req.params.dryCleanerId;
     const { authUser } = req as any;
- 
+
     if (authUser.userType !== "merchant") {
       throw new ApiError(403, "Unauthorized access");
     }
- 
+
     const rData = deleteServiceSchema.parse(req.body);
- 
+
     const dryCleaner = await DryCleaner.findById(dryCleanerId);
     if (!dryCleaner) {
       throw new ApiError(404, "Dry Cleaner not found");
     }
- 
+
     if (dryCleaner.owner.toString() !== authUser.user._id.toString()) {
       throw new ApiError(403, "Unauthorized to edit this Dry Cleaner");
     }
- 
+
     const serviceIndex = dryCleaner.services.findIndex(
       (s: any) => s._id.toString() === rData.serviceId
     );
- 
+
     if (serviceIndex === -1) {
       throw new ApiError(404, "Service not found");
     }
- 
+
     dryCleaner.services.splice(serviceIndex, 1);
     await dryCleaner.save();
- 
+
     res.status(200).json(
       new ApiResponse(200, { dryCleaner }, "Service deleted successfully.")
     );
   }
 );
- 
-

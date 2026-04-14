@@ -7,7 +7,9 @@ export interface IOrderItem {
   category: string;
   quantity: number;
   price: number;
-  starchLevel: number;
+  starchLevel: string;
+  merchantStarchLevel?: string;
+
   washOnly: boolean;
   options: {
     washAndFold: boolean;
@@ -100,7 +102,8 @@ const OrderItemSchema = new Schema({
   category: { type: String, required: true },
   quantity: { type: Number, required: true, min: 1 },
   price: { type: Number, required: true, min: 0 },
-  starchLevel: { type: Number, default: 0, min: 0, max: 3 },
+  starchLevel: { type: String, enum: ["low", "medium", "high"], default: "low" },
+  merchantStarchLevel: { type: String, enum: ["low", "medium", "high"], default: "medium" },
   washOnly: { type: Boolean, default: false },
   options: {
     washAndFold: { type: Boolean, default: false },
@@ -207,7 +210,7 @@ const BookingSchema = new Schema<IBooking>({
     type: Date,
     validate: {
       validator: function(this: IBooking, value: Date) {
-        if (this.scheduledPickupDateTime && value && value >= this.scheduledPickupDateTime) {
+        if (this.scheduledPickupDateTime && value && value <= this.scheduledPickupDateTime) {
           return false;
         }
         return true;

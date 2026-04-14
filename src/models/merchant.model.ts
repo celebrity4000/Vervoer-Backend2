@@ -362,11 +362,8 @@ const dryCleanerSchema = new mongoose.Schema({
         enum: SERVICE_CATEGORIES,
         default: "Other"
       },
-      starchLevel: { 
-        type: Number, 
-        enum: [1, 2, 3, 4, 5], 
-        default: 3 
-      },
+      starchLevel: { type: String, enum: ["low", "medium", "high"], default: "medium" }, 
+      merchantStarchLevel: { type: String, enum: ["low", "medium", "high"], default: "medium" },
       washOnly: { 
         type: Boolean, 
         default: false 
