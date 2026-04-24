@@ -42,172 +42,196 @@ export const Merchant = mongoose.model<IMerchant>(
   MerchantSchema,
   "merchants"
 );
-
 export interface IParking {
-  _id : mongoose.Types.ObjectId
-  images : [string],
-  owner : mongoose.Types.ObjectId ,
-  contactNumber : string,
-  email? : string ,
-  totalSlot? : number ,
-  parkingName : string ,
-  address : string ,
-  gpsLocation? : {type : "Point", coordinates : [number,number]},
-  price : number ,
-  about : string ,
-  spacesList : Map<string,{count : number , price : number}>,
-  generalAvailable : [{
-    day : "SUN" |  "MON" |  "TUE" |  "WED" |  "THU" |  "FRI" |  "SAT",
-    isOpen? : boolean,
-    openTime? : string ,
-    closeTime? : string ,
-    is24Hours : boolean ,
-  }],
+  _id: mongoose.Types.ObjectId;
+  images: [string];
+  owner: mongoose.Types.ObjectId;
+  contactNumber: string;
+  email?: string;
+  totalSlot?: number;
+  parkingName: string;
+  address: string;
+  gpsLocation?: { type: "Point"; coordinates: [number, number] };
+  price: number;
+  about: string;
+  spacesList: Map<string, { count: number; price: number }>;
+  generalAvailable: [{
+    day: "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
+    isOpen?: boolean;
+    openTime?: string;
+    closeTime?: string;
+    is24Hours: boolean;
+  }];
+  isMonthly: boolean;       // ← ADD
+  months?: number;          // ← ADD
+  vehicleNumber?: string;   
   vehicleType: "bike" | "car" | "both";
-  is24x7 : boolean,
-  isActive: boolean,
+  is24x7: boolean;
+  isActive: boolean;
+  // ── Monthly plan ─────────────────────────────────────────
+  monthlyChargeEnabled: boolean;
+  monthlyRate: number;
 }
+ 
 interface IParkingMethods {
-  isOpenNow: ()=>boolean ;
+  isOpenNow: () => boolean;
 }
-const parkingLotSchema = new mongoose.Schema<IParking,mongoose.Model<IParking> , IParkingMethods>({
-    images : [String],
-    owner : {
-        type : mongoose.Schema.ObjectId,
-        ref : "Merchant"
-    },
-    contactNumber : {
-      type : String ,
-      required : true
-    },
-    vehicleType: {
-      type: String,
-      enum: ["bike", "car", "both"],
-      required: true,
-      default: "both"
-    },
-    email : {
-      type : String ,
-    },
-    totalSlot : {
-      type : Number ,
-    },
-    parkingName : {
-        type : String , 
-        required: true
-    },
-    address : {
-        type : String , 
-        required: true
-    },
-    gpsLocation: {
-      type : {
-        type : String ,
-        enum : "Point",
-        default : "Point",
-      },
-      coordinates : {
-        type : [Number],
-        required : true ,
-      },
+ 
+const parkingLotSchema = new mongoose.Schema<IParking, mongoose.Model<IParking>, IParkingMethods>({
+  images: [String],
+  owner: {
+    type: mongoose.Schema.ObjectId,
+    ref: "Merchant"
   },
-    price : {
-        type: Number,
-        required : true ,
+  contactNumber: {
+    type: String,
+    required: true
+  },
+  vehicleType: {
+    type: String,
+    enum: ["bike", "car", "both"],
+    required: true,
+    default: "both"
+  },
+  email: {
+    type: String,
+  },
+  totalSlot: {
+    type: Number,
+  },
+  parkingName: {
+    type: String,
+    required: true
+  },
+  address: {
+    type: String,
+    required: true
+  },
+  gpsLocation: {
+    type: {
+      type: String,
+      enum: "Point",
+      default: "Point",
     },
-    about : {
-        type : String ,
-        required : true ,
+    coordinates: {
+      type: [Number],
+      required: true,
     },
-    spacesList : {
-        type : mongoose.Schema.Types.Map ,
-        of : new mongoose.Schema(
-        {
-          count: { type: Number, required: true },
-          price: { type: Number, required: true },
-        },
-        { _id: false }
-      ),
-    },
-    generalAvailable: [{
-      day: {
-        type: String,
-        enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
-        required: true
+  },
+  price: {
+    type: Number,
+    required: true,
+  },
+  about: {
+    type: String,
+    required: true,
+  },
+  spacesList: {
+    type: mongoose.Schema.Types.Map,
+    of: new mongoose.Schema(
+      {
+        count: { type: Number, required: true },
+        price: { type: Number, required: true },
       },
-      isOpen: {
-        type: Boolean,
-        default: true
-      },
-      openTime: String,
-      closeTime: String,
-      is24Hours: {
-        type: Boolean,
-        default: false
-      }
-    }],
-    is24x7: Boolean ,
-    isActive : {type : Boolean , default : true },
-}, { 
+      { _id: false }
+    ),
+  },
+  generalAvailable: [{
+    day: {
+      type: String,
+      enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
+      required: true
+    },
+    isOpen: {
+      type: Boolean,
+      default: true
+    },
+    openTime: String,
+    closeTime: String,
+    is24Hours: {
+      type: Boolean,
+      default: false
+    }
+  }],
+  is24x7: Boolean,
+  isActive: { type: Boolean, default: true },
+  // ── Monthly plan ─────────────────────────────────────────
+  monthlyChargeEnabled: { type: Boolean, default: false },
+  monthlyRate: { type: Number, default: 0 },
+}, {
   timestamps: true,
   toJSON: { virtuals: true },
   toObject: { virtuals: true },
-  methods : {
-    isOpenNow : function(){
+  methods: {
+    isOpenNow: function () {
       const now = new Date();
       const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
-  
+ 
       const todayHours = this.generalAvailable.find(ga => ga.day === today);
-  
+ 
       if (!todayHours || !todayHours.isOpen) return false;
       if (todayHours.is24Hours) return true;
-  
+ 
       const currentTime = now.getHours() * 100 + now.getMinutes();
       const openTime = parseInt(todayHours.openTime?.replace(':', '') || '0');
       const closeTime = parseInt(todayHours.closeTime?.replace(':', '') || '0');
-  
+ 
       return currentTime >= openTime && currentTime <= closeTime;
     }
   }
-})
-
-parkingLotSchema.index({ gpsLocation : '2dsphere' });
+});
+ 
+parkingLotSchema.index({ gpsLocation: '2dsphere' });
+ 
 export interface ILotRecord {
-  _id : mongoose.Types.ObjectId,
+  _id: mongoose.Types.ObjectId;
   lotId: mongoose.Types.ObjectId;
   renterInfo: mongoose.Types.ObjectId;
   rentedSlot: string;
   rentFrom: mongoose.Schema.Types.Date;
   rentTo: mongoose.Schema.Types.Date;
-  totalHours : number ;
+  totalHours: number;
   totalAmount: number;
-  priceRate : number ;
+  priceRate: number;
   amountToPaid: number;
   appliedCouponCode: string;
   serviceFee: number;
-transactionFee: number;
-estimatedTaxes: number;
+  transactionFee: number;
+  estimatedTaxes: number;
   discount: number;
+  vehicleNumber: {
+    type: String,
+    default: null,
+  },
+  isMonthly: {
+    type: Boolean,
+    default: false,
+  },
+  months: {
+    type: Number,
+    default: null,
+  },
   paymentDetails: {
     transactionId: string | null;
     paymentMethod: "CASH" | "CREDIT" | "DEBIT" | "STRIPE";
-    status : "PENDING" | "FAILED" | "SUCCESS" ;
+    status: "PENDING" | "FAILED" | "SUCCESS";
     amountPaidBy: number;
-    paidAt : Date ,
+    paidAt: Date;
     stripePaymentDetails: StripeIntentData;
   };
 }
-const lotRentRecordSchema = new mongoose.Schema<ILotRecord , mongoose.Model<ILotRecord>>({
+ 
+const lotRentRecordSchema = new mongoose.Schema<ILotRecord, mongoose.Model<ILotRecord>>({
   lotId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "ParkingLot",
   },
   renterInfo: {
     type: mongoose.Schema.Types.ObjectId,
-    ref : "User"
+    ref: "User"
   },
   rentedSlot: {
-    type: String, // Zone + Number
+    type: String,
     required: true,
   },
   rentFrom: {
@@ -223,17 +247,17 @@ const lotRentRecordSchema = new mongoose.Schema<ILotRecord , mongoose.Model<ILot
     required: true,
   },
   serviceFee: {
-  type: Number,
-  required: true,
-},
-transactionFee: {
-  type: Number,
-  required: true,
-},
-estimatedTaxes: {
-  type: Number,
-  required: true,
-},
+    type: Number,
+    required: true,
+  },
+  transactionFee: {
+    type: Number,
+    required: true,
+  },
+  estimatedTaxes: {
+    type: Number,
+    required: true,
+  },
   priceRate: {
     type: Number,
     required: true,
@@ -253,33 +277,37 @@ estimatedTaxes: {
     default: 0,
   },
   paymentDetails: {
-    type :  new mongoose.Schema(
-    {
-      transactionId: String,
-      paymentMethod: {
-        type: String,
-        enums: ["CASH", "CREDIT", "DEBIT", "STRIP"],
-        default: "STRIP",
+    type: new mongoose.Schema(
+      {
+        transactionId: String,
+        paymentMethod: {
+          type: String,
+          enums: ["CASH", "CREDIT", "DEBIT", "STRIP"],
+          default: "STRIP",
+        },
+        paidAt: Date,
+        status: {
+          type: String,
+          enums: ["PENDING", "FAILED", "SUCCESS"],
+          default: "PENDING",
+        },
+        amountPaidBy: Number,
+        stripePaymentDetails: {
+          type: new mongoose.Schema({
+            paymentIntent: { type: String, required: true },
+            ephemeralKey: String,
+            paymentIntentId: { type: String, required: true },
+          }, { _id: false })
+        }
       },
-      paidAt : Date ,
-      status : {
-        type : String ,
-        enums : ["PENDING" , "FAILED", "SUCCESS"],
-        default : "PENDING" ,
-      },
-      amountPaidBy: Number,
-      stripePaymentDetails:{type : new mongoose.Schema({
-        paymentIntent: {type : String , required : true},
-        ephemeralKey: String,
-        paymentIntentId: {type :String, required : true},
-      },{_id: false})}
-    },
-    { _id: false }
-  ),}
+      { _id: false }
+    ),
+  }
 });
-
-export const ParkingLotModel = mongoose.model<IParking>("ParkingLot",parkingLotSchema) ;
-export const LotRentRecordModel = mongoose.model<ILotRecord>("LotRentRecord", lotRentRecordSchema)
+ 
+export const ParkingLotModel = mongoose.model<IParking>("ParkingLot", parkingLotSchema);
+export const LotRentRecordModel = mongoose.model<ILotRecord>("LotRentRecord", lotRentRecordSchema);
+ 
 
 const addressSchema = new mongoose.Schema({
   street:   { type: String, required: true },
@@ -368,10 +396,13 @@ const dryCleanerSchema = new mongoose.Schema({
         type: Boolean, 
         default: false 
       },
-      additionalservice: { 
-        type: String, 
-        enum: ["zipper", "button", "wash/fold"] 
-      },
+    // ✅ Correct
+additionalservice: [
+  {
+    name: { type: String, enum: ["zipper", "button", "wash/fold"] },
+    price: { type: Number, min: 0, default: 0 },
+  }
+],
       price: { 
         type: Number,
         required: true,

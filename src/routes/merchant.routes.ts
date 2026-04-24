@@ -41,6 +41,9 @@ import {
   markResidenceSlotVacant, // ✅ NEW
 } from "../controllers/merchant.residence.controller.js";
 import { imageUploadFields } from "../middleware/upload.middleware.js";
+import { getMerchantStats } from "../controllers/Merchant.stats.controller.js";
+import { updateMonthlySettings } from "../controllers/Merchant.monthly.controller.js";
+import {getDryCleanerStats} from "../controllers/Merchant.drycleaner.stats.js";
 
 const merchantRouter = Router();
 
@@ -83,5 +86,8 @@ merchantRouter.get("/residence/booking/:id", residenceBookingInfo);
 merchantRouter.patch("/residence/booking/:id/mark-vacant", markResidenceSlotVacant); // ✅ NEW
 merchantRouter.delete("/residence/booking/:bookingId", deleteResidenceBooking);
 merchantRouter.get("/residence/:residenceId", getResidenceById);
+merchantRouter.get("/stats", getMerchantStats);
+merchantRouter.patch("/monthly-settings", updateMonthlySettings);
+merchantRouter.get("/dry-cleaner-stats", getDryCleanerStats);
 
 export default merchantRouter;

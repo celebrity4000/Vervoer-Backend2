@@ -34,6 +34,9 @@ export interface IGarage {
   coveredDrivewayAvailable: boolean;
   coveredDrivewayTypes?: string[];
   securityCamera: boolean;
+  // ── Monthly plan ─────────────────────────────────────────
+  monthlyChargeEnabled: boolean;
+  monthlyRate: number;
 }
 
 interface GarageMethods {
@@ -84,7 +87,10 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
     transportationTypes: { type: [String], default: undefined },
     coveredDrivewayAvailable: { type: Boolean, default: false },
     coveredDrivewayTypes: { type: [String], default: undefined },
-    securityCamera: { type: Boolean, default: false }
+    securityCamera: { type: Boolean, default: false },
+    // ── Monthly plan ─────────────────────────────────────────
+    monthlyChargeEnabled: { type: Boolean, default: false },
+    monthlyRate: { type: Number, default: 0 },
   },
   {
     timestamps: true,
@@ -119,7 +125,6 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
 
 garageSchema.index({ location: '2dsphere' });
 
-// ✅ Updated: replaced platformCharge with serviceFee, transactionFee, estimatedTaxes
 interface IGarageBooking {
   garageId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
@@ -134,6 +139,9 @@ interface IGarageBooking {
   couponCode?: string;
   discount: number;
   priceRate: number;
+  vehicleImage?: string;   
+  isMonthly?: boolean;          // ← ADD
+  months?: number;                   
   paymentDetails: {
     transactionId?: string;
     amount: number;
@@ -157,13 +165,15 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
     bookedSlot: { type: String, required: true },
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
-    // ✅ Replaced platformCharge with three new fee fields
     serviceFee: { type: Number, required: true, default: 0 },
     transactionFee: { type: Number, required: true, default: 0 },
     estimatedTaxes: { type: Number, required: true, default: 0 },
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },
+    isMonthly: { type: Boolean, default: false },
+    months: { type: Number, default: null },
+    vehicleImage: { type: String, default: null },
     paymentDetails: {
       transactionId: String,
       amount: Number,

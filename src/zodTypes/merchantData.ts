@@ -1,4 +1,5 @@
 import { z } from "zod/v4";
+
 const gpsLocationSchema = z.object({
   type: z.literal("Point").default("Point"),
   coordinates: z.tuple(
@@ -46,6 +47,9 @@ export const ParkingData = z.object({
     })
     .optional(),
   is24x7: z.coerce.boolean().default(false),
+  // ── Monthly plan ─────────────────────────────────────────
+  monthlyChargeEnabled: z.coerce.boolean().optional().default(false),
+  monthlyRate: z.coerce.number().min(0).optional().default(0),
 });
 
 export const BookingData = z.object({
@@ -54,6 +58,7 @@ export const BookingData = z.object({
     .string()
     .min(1, "Car license plate image string is required"),
 });
+
 export type BookingData = z.infer<typeof BookingData>;
 export type ParkingData = z.infer<typeof ParkingData>;
 
@@ -78,10 +83,11 @@ export const residenceSchema = z.object({
   transportationTypes: z.array(z.string()).optional(),
   coveredDrivewayAvailable: z.coerce.boolean().optional(),
   coveredDrivewayTypes: z.array(z.string()).optional(),
-  securityCamera: z.coerce.boolean().optional()
+  securityCamera: z.coerce.boolean().optional(),
+  // ── Monthly plan ─────────────────────────────────────────
+  monthlyChargeEnabled: z.coerce.boolean().optional().default(false),
+  monthlyRate: z.coerce.number().min(0).optional().default(0),
 });
-
- 
 
 // Schema for updating residence (all fields optional)
 export const updateResidenceSchema = residenceSchema.partial();

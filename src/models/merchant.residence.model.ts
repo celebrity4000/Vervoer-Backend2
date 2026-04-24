@@ -32,6 +32,9 @@ export interface IResident {
   coveredDrivewayAvailable: boolean;
   coveredDrivewayTypes?: string[];
   securityCamera: boolean;
+  // ── Monthly plan ─────────────────────────────────────────
+  monthlyChargeEnabled: boolean;
+  monthlyRate: number;
 }
 
 interface ResidentMethods {
@@ -74,6 +77,9 @@ const residenceSchema = new mongoose.Schema<IResident, mongoose.Model<IResident>
     coveredDrivewayAvailable: { type: Boolean, default: false },
     coveredDrivewayTypes: { type: [String], default: undefined },
     securityCamera: { type: Boolean, default: false },
+    // ── Monthly plan ─────────────────────────────────────────
+    monthlyChargeEnabled: { type: Boolean, default: false },
+    monthlyRate: { type: Number, default: 0 },
   },
   {
     timestamps: true,
@@ -98,7 +104,6 @@ const residenceSchema = new mongoose.Schema<IResident, mongoose.Model<IResident>
 residenceSchema.index({ gpsLocation: "2dsphere" });
 export const ResidenceModel = mongoose.model("Residence", residenceSchema);
 
-// ✅ Updated: replaced platformCharge with serviceFee, transactionFee, estimatedTaxes
 export interface IResidenceBooking {
   residenceId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
@@ -112,6 +117,8 @@ export interface IResidenceBooking {
   couponCode?: string;
   discount: number;
   priceRate: number;
+  isMonthly?: boolean;
+months?: number;
   paymentDetails: {
     transactionId?: string;
     amount: number;
@@ -134,13 +141,14 @@ const residenceBookingSchema = new mongoose.Schema<IResidenceBooking>(
     vehicleNumber: { type: String },
     totalAmount: { type: Number, required: true },
     amountToPaid: { type: Number, required: true },
-    // ✅ Replaced platformCharge with three new fee fields
     serviceFee: { type: Number, required: true, default: 0 },
     transactionFee: { type: Number, required: true, default: 0 },
     estimatedTaxes: { type: Number, required: true, default: 0 },
     couponCode: String,
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },
+    isMonthly: { type: Boolean, default: false },
+months: { type: Number, default: null },
     paymentDetails: {
       transactionId: String,
       amount: Number,

@@ -9,7 +9,7 @@ import uploadToCloudinary from "../utils/cloudinary.js";
 import { residenceSchema, updateResidenceSchema, type ResidenceData } from "../zodTypes/merchantData.js";
 import z from "zod/v4";
 import mongoose from "mongoose";
-import { createStripeCustomer, initPayment, StripeIntentData, verifyStripePayment } from "../utils/stripePayments.js";
+import { validateOrCreateCustomer, initPayment, StripeIntentData, verifyStripePayment } from "../utils/stripePayments.js";
 import { User, IUser } from "../models/normalUser.model.js";
 
 type MUserRes = mongoose.Document<mongoose.Types.ObjectId, {}, IUser> & IUser;
@@ -158,6 +158,10 @@ const CheckOutResidenceData = z.object({
   residenceId: z.string(),
   bookingPeriod: z.object({ to: z.iso.datetime(), from: z.iso.datetime() }),
   couponCode: z.string().optional(),
+  vehicleNumber: z.string().optional(),
+  paymentMethod: z.enum(["CASH", "CREDIT", "DEBIT", "UPI"]).optional(),
+  isMonthly: z.coerce.boolean().optional().default(false),
+  months: z.coerce.number().int().min(1).max(12).optional().default(1),
 });
 
 // ✅ Updated CBookingData: replaced platformCharge with three new fee fields
@@ -170,6 +174,10 @@ interface CBookingData {
   serviceFee: number;
   transactionFee: number;
   estimatedTaxes: number;
+  vehicleNumber?: string;
+  isMonthly: boolean;       // ← ADD
+  months?: number;          // ← ADD
+  priceRate: number;        // ← ADD (so it's explicit)
 }
 
 async function createABooking(
@@ -183,6 +191,8 @@ async function createABooking(
     customerId: user._id,
     ...data,
     priceRate: residence.price,
+    isMonthly: data.isMonthly,        // ← ADD
+    months: data.isMonthly ? data.months : undefined,  // ← ADD
     paymentDetails: {
       amount: data.amountToPaid,
       paymentGateway: "STRIPE",
@@ -191,8 +201,6 @@ async function createABooking(
       StripePaymentDetails: stripeDetails
     }
   } as IResidenceBooking);
-
-  if (!booking) throw new ApiError(400, "SERVER_ERROR: can't book");
 
   return {
     bookingId: booking._id,
@@ -209,7 +217,9 @@ async function createABooking(
       estimatedTaxes: booking.estimatedTaxes,
       couponApplied: booking.couponCode !== undefined,
       couponDetails: booking.couponCode || null,
-      totalAmount: booking.amountToPaid
+      totalAmount: booking.amountToPaid,
+      isMonthly: data.isMonthly,                        // ← ADD
+      months: data.isMonthly ? data.months : undefined, // ← ADD
     },
     stripeDetails: booking.paymentDetails.StripePaymentDetails,
     placeInfo: {
@@ -231,57 +241,81 @@ export const checkoutResidence = asyncHandler(async (req, res) => {
     const sd = new Date(rData.bookingPeriod.from);
     const ed = new Date(rData.bookingPeriod.to);
 
-    if (ed < sd) throw new ApiError(400, "WRONG_DATE");
+    if (ed <= sd) throw new ApiError(400, "WRONG_DATE");
 
-    const residence = await ResidenceModel.findById(rData.residenceId).populate<{ owner: IMerchant }>("owner", "-password");
+    const residence = await ResidenceModel.findById(rData.residenceId)
+      .populate<{ owner: IMerchant }>("owner", "-password");
     if (!residence) throw new ApiError(400, "WRONG_RESIDENCE_ID");
 
     const isBooked = await findBookedResidenceIn(sd, ed, rData.residenceId);
     if (isBooked.length !== 0) throw new ApiError(400, "NOT_AVAILABLE");
 
-    const totalHours = (ed.getTime() - sd.getTime()) / 3600000;
-    const totalAmount = totalHours * residence.price;
+    // ── Monthly flags ──────────────────────────────────────────────────────
+    const isMonthly = rData.isMonthly ?? false;
+    const months    = rData.months    ?? 1;
 
-    // ✅ New fee structure
-    let discount = 0;
-    const serviceFee = totalAmount * 0.05;
-    const transactionFee = 0.50;
-    const estimatedTaxes = totalAmount * 0.15;
+    // ── Pricing ────────────────────────────────────────────────────────────
+    let totalAmount: number;
+    let effectiveRate: number;
 
-    if (rData.couponCode) {
-      const dp = verifyCouponCode(rData.couponCode);
-      discount = totalAmount * dp;
-    }
-
-    const amountToPaid = totalAmount + serviceFee + transactionFee + estimatedTaxes - discount;
-
-    let stripeCustomerId = "";
-    if (!verifiedAuth.user.stripeCustomerId) {
-      stripeCustomerId = await createStripeCustomer(`${verifiedAuth.user.firstName} ${verifiedAuth.user.lastName}`, verifiedAuth.user.email);
-      try {
-        User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId });
-      } catch (err) {
-        console.log("Couldn't update the stripe customer Id");
-      }
+    if (isMonthly) {
+      const monthlyEnabled = residence.monthlyChargeEnabled ?? false;
+      const monthlyRate    = residence.monthlyRate          ?? 0;
+      const useFlat        = monthlyEnabled && monthlyRate > 0;
+      effectiveRate        = useFlat ? monthlyRate : residence.price * 730;
+      totalAmount          = effectiveRate * months;
     } else {
-      stripeCustomerId = verifiedAuth.user.stripeCustomerId;
+      const totalHours = (ed.getTime() - sd.getTime()) / 3600000;
+      effectiveRate    = residence.price;
+      totalAmount      = totalHours * residence.price;
     }
 
-    const paymentDetails = await initPayment(amountToPaid, stripeCustomerId);
+    let discount = 0;
+    if (rData.couponCode) {
+      discount = totalAmount * verifyCouponCode(rData.couponCode);
+    }
+
+    const serviceFee     = totalAmount * 0.05;
+    const transactionFee = 0.5;
+    const estimatedTaxes = totalAmount * 0.15;
+    const amountToPaid   = totalAmount + serviceFee + transactionFee + estimatedTaxes - discount;
+
+    // ── Stripe customer (same pattern as garage) ───────────────────────────
+    const { validateOrCreateCustomer } = await import("../utils/stripePayments.js");
+    const validCustomerId = await validateOrCreateCustomer(
+      verifiedAuth.user.stripeCustomerId,
+      `${verifiedAuth.user.firstName} ${verifiedAuth.user.lastName}`,
+      verifiedAuth.user.email
+    );
+    if (validCustomerId !== verifiedAuth.user.stripeCustomerId) {
+      await User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId: validCustomerId });
+    }
+
+    const paymentDetails = await initPayment(amountToPaid, validCustomerId);
+
     const response = await createABooking(
-      { bookingPeriod: { to: ed, from: sd }, totalAmount, discount, couponCode: rData.couponCode, amountToPaid, serviceFee, transactionFee, estimatedTaxes },
-      { ...paymentDetails, customerId: stripeCustomerId },
+      {
+        bookingPeriod: { to: ed, from: sd },
+        totalAmount,
+        discount,
+        couponCode: rData.couponCode,
+        amountToPaid,
+        serviceFee,
+        transactionFee,
+        estimatedTaxes,
+        vehicleNumber: rData.vehicleNumber,
+        isMonthly,
+        months,
+        priceRate: effectiveRate,
+      },
+      { ...paymentDetails, customerId: validCustomerId },
       verifiedAuth.user,
       residence
     );
 
     res.status(200).json(new ApiResponse(200, response));
   } catch (err) {
-    console.log(err);
-    if (err instanceof z.ZodError) {
-      console.log(err.issues);
-      throw new ApiError(400, "INVALID_DATA");
-    }
+    if (err instanceof z.ZodError) { console.log(err.issues); throw new ApiError(400, "INVALID_DATA"); }
     throw err;
   }
 });
