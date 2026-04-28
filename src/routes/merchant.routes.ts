@@ -44,6 +44,8 @@ import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { getMerchantStats } from "../controllers/Merchant.stats.controller.js";
 import { updateMonthlySettings } from "../controllers/Merchant.monthly.controller.js";
 import {getDryCleanerStats} from "../controllers/Merchant.drycleaner.stats.js";
+import { addMerchantSubAccount, getMerchantSubAccounts, removeMerchantSubAccount, subAccountLogin, toggleSubAccountStatus } from "../controllers/User.js";
+import { authenticate } from "../middleware/auth.middleware.js";
 
 const merchantRouter = Router();
 
@@ -89,5 +91,20 @@ merchantRouter.get("/residence/:residenceId", getResidenceById);
 merchantRouter.get("/stats", getMerchantStats);
 merchantRouter.patch("/monthly-settings", updateMonthlySettings);
 merchantRouter.get("/dry-cleaner-stats", getDryCleanerStats);
+
+
+merchantRouter.post("/sub-account/login", subAccountLogin);
+ merchantRouter.use("/sub-accounts", (req, res, next) => {
+  console.log("Auth header:", req.headers.authorization);
+  next();
+});
+// Protected — only the primary merchant account can manage sub-accounts
+merchantRouter.use(authenticate); // apply your JWT auth middleware
+ 
+merchantRouter.get("/sub-accounts", getMerchantSubAccounts);
+merchantRouter.post("/sub-accounts", addMerchantSubAccount);
+merchantRouter.patch("/sub-accounts/toggle", toggleSubAccountStatus);
+merchantRouter.delete("/sub-accounts", removeMerchantSubAccount);
+
 
 export default merchantRouter;

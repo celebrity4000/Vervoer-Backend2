@@ -10,6 +10,7 @@ export const UserBaseSchemaFields = {
   userType: { type: String, enum: ["user", "driver", "merchant"], default: "user" },
   otp: { type: String },
   otpExpiry: { type: Date },
+  vehicleNumber: { type: String, optional: true },
   isVerified: { type: Boolean, default: false },
   profileImage: { type: String },
   stripeCustomerId : String ,

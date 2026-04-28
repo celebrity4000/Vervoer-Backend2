@@ -37,6 +37,7 @@ export const registerUser = async (
       state,
       zipCode,
       userType,
+      vehicleNumber, 
     } = registerUserSchema.parse(req.body);
 
     if (!password) {
@@ -102,6 +103,9 @@ export const registerUser = async (
         userType,
         otp,
         otpExpiry,
+        ...(vehicleNumber?.trim() && {
+          vehicleNumber: vehicleNumber.trim().toUpperCase(),
+        }),
       });
     }
 
@@ -113,9 +117,9 @@ export const registerUser = async (
       console.error("Failed to send OTP email:", error);
     });
 
-    const token = jwtEncode({ 
-      userId: newUser._id, 
-      userType: userType 
+    const token = jwtEncode({
+      userId: newUser._id,
+      userType: userType,
     });
 
     res.status(201).json({
@@ -577,7 +581,7 @@ export const getUserProfile = asyncHandler(async (req: Request, res: Response) =
   let user: any = null;
 
   if (userType === 'user') {
-    user = await User.findById(userId).select("firstName lastName email phoneNumber country state zipCode profileImage");
+    user = await User.findById(userId).select("firstName lastName email phoneNumber country state zipCode profileImage vehicleNumber");
   } else if (userType === 'merchant') {
     user = await Merchant.findById(userId).select("firstName lastName email phoneNumber profileImage country state zipCode");
   } else if (userType === 'driver') {
@@ -600,9 +604,10 @@ const partialEditSchema = z.object({
   country: z.string().optional(),
   state: z.string().optional(),
   zipCode: z.string().optional(),
+  vehicleNumber: z.string().optional(), 
 });
 
-export const editUserProfile = asyncHandler(async (req: Request) => {
+export const editUserProfile = asyncHandler(async (req: Request, res: Response) => {
   const userId = (req.authUser?.user as any)?._id;
   const userType = req.authUser?.userType;
 
@@ -610,8 +615,14 @@ export const editUserProfile = asyncHandler(async (req: Request) => {
     throw new ApiError(401, "Unauthorized user");
   }
 
-  // Validate incoming fields
-  const validatedData = partialEditSchema.parse(req.body);
+  let validatedData;
+  try {
+    validatedData = partialEditSchema.parse(req.body);
+  } catch (zodError) {
+    console.log("ZOD ERROR:", zodError);
+    throw new ApiError(400, "INVALID_DATA");
+  }
+
   const updateFields: Record<string, any> = { ...validatedData };
 
   if (req.files && "profileImage" in req.files) {
@@ -620,10 +631,6 @@ export const editUserProfile = asyncHandler(async (req: Request) => {
       const result = await uploadToCloudinary(file.buffer);
       updateFields.profileImage = result.secure_url;
     }
-  }
-
-  if (Object.keys(updateFields).length === 0) {
-    throw new ApiError(400, "No valid fields provided for update");
   }
 
   let ModelToUpdate: Model<any>;
@@ -635,13 +642,14 @@ export const editUserProfile = asyncHandler(async (req: Request) => {
     userId,
     { $set: updateFields },
     { new: true }
-  ).select("firstName lastName email phoneNumber country state zipCode profileImage userType");
+  ).select("firstName lastName email phoneNumber country state zipCode profileImage userType vehicleNumber");
 
   if (!updatedUser) {
     throw new ApiError(404, "User not found");
   }
 
-  return new ApiResponse(200, updatedUser, "Profile updated successfully");
+  // ✅ THE FIX — actually send HTTP response
+  res.status(200).json(new ApiResponse(200, updatedUser, "Profile updated successfully"));
 });
 
 
@@ -722,3 +730,218 @@ export const getBankDetails = asyncHandler(async (req: Request, res: Response) =
 
   res.status(200).json(new ApiResponse(200, bankDetails, "Bank details retrieved successfully"));
 });
+
+
+const addSubAccountSchema = z.object({
+  email: z.string().email("Invalid email address"),
+  password: z.string().min(6, "Password must be at least 6 characters"),
+  label: z.string().min(1).max(50).optional(), // e.g. "Manager", "Cashier"
+});
+ 
+const removeSubAccountSchema = z.object({
+  subAccountId: z.string().min(1),
+});
+ 
+const subAccountLoginSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(6),
+});
+ 
+// ── Add Sub-Account (Merchant only) ───────────────────────────────────────
+ 
+export const addMerchantSubAccount = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { user, userType } = await verifyAuthentication(req);
+ 
+    if (userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can add sub-accounts");
+    }
+ 
+    const merchant = await Merchant.findById(user._id);
+    if (!merchant) throw new ApiError(404, "Merchant not found");
+ 
+    const { email, password, label } = addSubAccountSchema.parse(req.body);
+ 
+    // Check duplicate across main account and existing sub-accounts
+    if (merchant.email === email) {
+      throw new ApiError(400, "Email already used as primary account");
+    }
+ 
+    const alreadyExists = merchant.subAccounts?.some(
+      (sa: any) => sa.email === email
+    );
+    if (alreadyExists) {
+      throw new ApiError(400, "Sub-account with this email already exists");
+    }
+ 
+    const MAX_SUB_ACCOUNTS = 10;
+    if ((merchant.subAccounts?.length ?? 0) >= MAX_SUB_ACCOUNTS) {
+      throw new ApiError(400, `Maximum ${MAX_SUB_ACCOUNTS} sub-accounts allowed`);
+    }
+ 
+    const hashedPassword = await bcrypt.hash(password, 10);
+ 
+    merchant.subAccounts = merchant.subAccounts ?? [];
+    merchant.subAccounts.push({
+      email,
+      password: hashedPassword,
+      label: label ?? "",
+      createdAt: new Date(),
+      isActive: true,
+    });
+ 
+    await merchant.save();
+ 
+    // Return without exposing passwords
+    const sanitized = merchant.subAccounts.map((sa: any) => ({
+      _id: sa._id,
+      email: sa.email,
+      label: sa.label,
+      isActive: sa.isActive,
+      createdAt: sa.createdAt,
+    }));
+ 
+    res
+      .status(201)
+      .json(
+        new ApiResponse(201, sanitized, "Sub-account added successfully")
+      );
+  }
+);
+ 
+// ── List Sub-Accounts ──────────────────────────────────────────────────────
+ 
+export const getMerchantSubAccounts = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { user, userType } = await verifyAuthentication(req);
+ 
+    if (userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can view sub-accounts");
+    }
+ 
+    const merchant = await Merchant.findById(user._id).select("subAccounts");
+    if (!merchant) throw new ApiError(404, "Merchant not found");
+ 
+    const sanitized = (merchant.subAccounts ?? []).map((sa: any) => ({
+      _id: sa._id,
+      email: sa.email,
+      label: sa.label,
+      isActive: sa.isActive,
+      createdAt: sa.createdAt,
+    }));
+ 
+    res
+      .status(200)
+      .json(
+        new ApiResponse(200, sanitized, "Sub-accounts fetched successfully")
+      );
+  }
+);
+ 
+// ── Toggle Sub-Account Active/Inactive ────────────────────────────────────
+ 
+export const toggleSubAccountStatus = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { user, userType } = await verifyAuthentication(req);
+ 
+    if (userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can manage sub-accounts");
+    }
+ 
+    const { subAccountId } = removeSubAccountSchema.parse(req.body);
+ 
+    const merchant = await Merchant.findById(user._id);
+    if (!merchant) throw new ApiError(404, "Merchant not found");
+ 
+    const subAccount = merchant.subAccounts?.id(subAccountId);
+    if (!subAccount) throw new ApiError(404, "Sub-account not found");
+ 
+    subAccount.isActive = !subAccount.isActive;
+    await merchant.save();
+ 
+    res.status(200).json(
+      new ApiResponse(
+        200,
+        { _id: subAccount._id, isActive: subAccount.isActive },
+        `Sub-account ${subAccount.isActive ? "activated" : "deactivated"}`
+      )
+    );
+  }
+);
+ 
+// ── Remove Sub-Account ────────────────────────────────────────────────────
+ 
+export const removeMerchantSubAccount = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { user, userType } = await verifyAuthentication(req);
+ 
+    if (userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can remove sub-accounts");
+    }
+ 
+    const { subAccountId } = removeSubAccountSchema.parse(req.body);
+ 
+    const merchant = await Merchant.findById(user._id);
+    if (!merchant) throw new ApiError(404, "Merchant not found");
+ 
+    const before = merchant.subAccounts?.length ?? 0;
+    merchant.subAccounts = merchant.subAccounts?.filter(
+      (sa: any) => sa._id.toString() !== subAccountId
+    );
+ 
+    if ((merchant.subAccounts?.length ?? 0) === before) {
+      throw new ApiError(404, "Sub-account not found");
+    }
+ 
+    await merchant.save();
+ 
+    res
+      .status(200)
+      .json(new ApiResponse(200, null, "Sub-account removed successfully"));
+  }
+);
+ 
+// ── Sub-Account Login ─────────────────────────────────────────────────────
+// Sub-account holders log in with this endpoint; they receive a JWT scoped
+// to the parent merchant with a subAccountId claim.
+ 
+export const subAccountLogin = asyncHandler(
+  async (req: Request, res: Response) => {
+    const { email, password } = subAccountLoginSchema.parse(req.body);
+ 
+    // Search all merchants for a matching sub-account email
+    const merchant = await Merchant.findOne({
+      "subAccounts.email": email,
+    });
+ 
+    if (!merchant) {
+      throw new ApiError(404, "Invalid credentials");
+    }
+ 
+    const subAccount = merchant.subAccounts?.find(
+      (sa: any) => sa.email === email
+    );
+ 
+    if (!subAccount) throw new ApiError(404, "Invalid credentials");
+ 
+    if (!subAccount.isActive) {
+      throw new ApiError(403, "This sub-account has been deactivated");
+    }
+ 
+    const isMatch = await bcrypt.compare(password, subAccount.password);
+    if (!isMatch) throw new ApiError(401, "Invalid credentials");
+ 
+    // Token carries merchant's ID + sub-account marker
+    const token = jwtEncode({
+      userId: merchant._id,
+      userType: "merchant",
+      subAccountId: subAccount._id,
+      subAccountEmail: subAccount.email,
+    });
+ 
+    res.status(200).json(
+      new ApiResponse(200, { token, merchantId: merchant._id }, "Sub-account login successful")
+    );
+  }
+);
+ 

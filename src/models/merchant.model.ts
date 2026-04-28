@@ -20,10 +20,29 @@ export interface IMerchant extends Document {
   haveDryCleaner: boolean;
   haveParkingLot: boolean;
   haveResidenceParking: boolean;
+  subAccounts?: ISubAccount[];
   bankDetails?: IBankDetails;
   profileImage?: string;
   stripeCustomerId?:string ;
 }
+export interface ISubAccount {
+  _id?: any;
+  email: string;
+  password: string;
+  label?: string;
+  isActive: boolean;
+  createdAt: Date;
+}
+const subAccountSchema = new Schema<ISubAccount>(
+  {
+    email: { type: String, required: true, lowercase: true, trim: true },
+    password: { type: String, required: true },
+    label: { type: String, default: "" },
+    isActive: { type: Boolean, default: true },
+    createdAt: { type: Date, default: Date.now },
+  },
+  { _id: true }
+);
 
 const MerchantSchema = new Schema(
   {
@@ -33,6 +52,7 @@ const MerchantSchema = new Schema(
     haveDryCleaner: { type: Boolean, default: false },
     haveResidenceParking: { type: Boolean, default: false },
     bankDetails: BankDetailsSchema,
+    subAccounts:{ type: [subAccountSchema], default: [] },
   },
   { timestamps: true }
 );

@@ -10,4 +10,5 @@ export const registerUserSchema = z.object({
   state: z.string().nonempty(),
   zipCode: z.string().nonempty(),
   userType: z.enum(["user", "merchant", "driver"]),
+  vehicleNumber: z.string().optional(), 
 });
