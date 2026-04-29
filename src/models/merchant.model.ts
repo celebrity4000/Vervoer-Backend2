@@ -4,6 +4,7 @@ import { BankDetailsSchema ,IBankDetails} from "./bankDetails.model.js";
 import { StripeIntentData } from "../utils/stripePayments.js";
 import { required } from "zod/v4-mini";
 
+
 export interface IMerchant extends Document {
   phoneNumber: string;
   password: string;
@@ -242,88 +243,51 @@ export interface ILotRecord {
 }
  
 const lotRentRecordSchema = new mongoose.Schema<ILotRecord, mongoose.Model<ILotRecord>>({
-  lotId: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "ParkingLot",
-  },
-  renterInfo: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: "User"
-  },
-  rentedSlot: {
-    type: String,
-    required: true,
-  },
-  rentFrom: {
-    type: mongoose.Schema.Types.Date,
-    required: true,
-  },
-  rentTo: {
-    type: mongoose.Schema.Types.Date,
-    required: true,
-  },
-  totalHours: {
-    type: Number,
-    required: true,
-  },
-  serviceFee: {
-    type: Number,
-    required: true,
-  },
-  transactionFee: {
-    type: Number,
-    required: true,
-  },
-  estimatedTaxes: {
-    type: Number,
-    required: true,
-  },
-  priceRate: {
-    type: Number,
-    required: true,
-  },
-  totalAmount: {
-    type: Number,
-    required: true,
-  },
-  amountToPaid: {
-    type: Number,
-    required: true,
-  },
+  lotId:      { type: mongoose.Schema.Types.ObjectId, ref: "ParkingLot" },
+  renterInfo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+  rentedSlot: { type: String, required: true },
+  rentFrom:   { type: mongoose.Schema.Types.Date, required: true },
+  rentTo:     { type: mongoose.Schema.Types.Date, required: true },
+  totalHours:     { type: Number, required: true },
+  serviceFee:     { type: Number, required: true },
+  transactionFee: { type: Number, required: true },
+  estimatedTaxes: { type: Number, required: true },
+  priceRate:      { type: Number, required: true },
+  totalAmount:    { type: Number, required: true },
+  amountToPaid:   { type: Number, required: true },
   appliedCouponCode: String,
-  discount: {
-    type: Number,
-    required: true,
-    default: 0,
-  },
+  discount:   { type: Number, required: true, default: 0 },
+
+  // ── ADD THESE THREE MISSING FIELDS ──────────────────────
+  vehicleNumber: { type: String, default: null },
+  isMonthly:     { type: Boolean, default: false },
+  months:        { type: Number, default: null },
+
   paymentDetails: {
-    type: new mongoose.Schema(
-      {
-        transactionId: String,
-        paymentMethod: {
-          type: String,
-          enums: ["CASH", "CREDIT", "DEBIT", "STRIP"],
-          default: "STRIP",
-        },
-        paidAt: Date,
-        status: {
-          type: String,
-          enums: ["PENDING", "FAILED", "SUCCESS"],
-          default: "PENDING",
-        },
-        amountPaidBy: Number,
-        stripePaymentDetails: {
-          type: new mongoose.Schema({
-            paymentIntent: { type: String, required: true },
-            ephemeralKey: String,
-            paymentIntentId: { type: String, required: true },
-          }, { _id: false })
-        }
+    type: new mongoose.Schema({
+      transactionId: String,
+      paymentMethod: {
+        type: String,
+        enum: ["CASH", "CREDIT", "DEBIT", "STRIPE"], // ← enum not enums, STRIPE not STRIP
+        default: "STRIPE",
       },
-      { _id: false }
-    ),
+      paidAt: Date,
+      status: {
+        type: String,
+        enum: ["PENDING", "FAILED", "SUCCESS"], // ← enum not enums
+        default: "PENDING",
+      },
+      amountPaidBy: Number,
+      stripePaymentDetails: {
+        type: new mongoose.Schema({
+          paymentIntent:   { type: String, required: true },
+          ephemeralKey:    String,
+          paymentIntentId: { type: String, required: true },
+        }, { _id: false })
+      }
+    }, { _id: false }),
   }
-});
+}, { timestamps: true });
  
 export const ParkingLotModel = mongoose.model<IParking>("ParkingLot", parkingLotSchema);
 export const LotRentRecordModel = mongoose.model<ILotRecord>("LotRentRecord", lotRentRecordSchema);
