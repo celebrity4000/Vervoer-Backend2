@@ -487,19 +487,21 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     }
 
     if (paymentMethod === "CASH") {
-      booking.paymentDetails.status = "SUCCESS";
-      booking.paymentDetails.paidAt = new Date();
-      booking.vehicleImage          = carLicensePlateImage;
-      await booking.save();
-      return res.status(200).json(new ApiResponse(200, {
-        message:       "Booking confirmed with cash payment",
-        bookingId:     booking._id,
-        paymentStatus: "SUCCESS",
-        paymentMethod: "CASH",
-        slot:          booking.bookedSlot,
-        vehicleNumber: booking.vehicleNumber,
-      }));
-    }
+  // Record the vehicle image and method, but leave status PENDING
+  // Merchant confirms via PATCH /merchants/garage/booking/:id/confirm-cash
+  booking.paymentDetails.method = "CASH";
+  booking.vehicleImage          = carLicensePlateImage;
+  await booking.save();
+  return res.status(200).json(new ApiResponse(200, {
+    message:       "Booking created. Awaiting merchant cash payment confirmation.",
+    bookingId:     booking._id,
+    paymentStatus: "PENDING",
+    paymentMethod: "CASH",
+    slot:          booking.bookedSlot,
+    vehicleNumber: booking.vehicleNumber,
+  }));
+}
+
 
     if (paymentMethod === "CREDIT" || paymentMethod === "CARD") {
       if (!paymentIntentId) throw new ApiError(400, "PAYMENT_INTENT_REQUIRED");
@@ -525,6 +527,70 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     throw new ApiError(400, "INVALID_PAYMENT_METHOD");
   } catch (err) {
     throw err;
+  }
+});
+
+
+export const confirmCashPaymentGarage = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId    = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+ 
+    if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can confirm cash payments");
+    }
+ 
+    const booking = await GarageBooking.findById(bookingId);
+    if (!booking) throw new ApiError(404, "BOOKING_NOT_FOUND");
+ 
+    if (booking.paymentDetails.method !== "CASH") {
+      throw new ApiError(400, "This booking is not a cash payment");
+    }
+    if (booking.paymentDetails.status === "SUCCESS") {
+      throw new ApiError(400, "Cash payment has already been confirmed");
+    }
+    if (booking.paymentDetails.status === "FAILED") {
+      throw new ApiError(400, "This booking has been cancelled");
+    }
+ 
+    // Verify merchant owns this garage
+    const garage = await Garage.findById(booking.garageId);
+    if (!garage) throw new ApiError(404, "GARAGE_NOT_FOUND");
+    if (garage.owner.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, "You do not own this garage");
+    }
+ 
+    // Final slot conflict check
+    const conflict = await GarageBooking.findOne({
+      _id:                     { $ne: booking._id },
+      garageId:                booking.garageId,
+      bookedSlot:              booking.bookedSlot,
+      "paymentDetails.status": "SUCCESS",
+      "bookingPeriod.from":    { $lt: booking.bookingPeriod.to },
+      "bookingPeriod.to":      { $gt: booking.bookingPeriod.from },
+    });
+    if (conflict) {
+      booking.paymentDetails.status = "FAILED";
+      await booking.save();
+      throw new ApiError(400, "SLOT_NOT_AVAILABLE");
+    }
+ 
+    booking.paymentDetails.status = "SUCCESS";
+    booking.paymentDetails.paidAt = new Date();
+    await booking.save();
+ 
+    res.status(200).json(
+      new ApiResponse(200, {
+        bookingId,
+        slot:          booking.bookedSlot,
+        confirmedAt:   booking.paymentDetails.paidAt,
+        paymentMethod: "CASH",
+        paymentStatus: "SUCCESS",
+      }, "Cash payment confirmed. Booking is now active.")
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) throw new ApiError(400, "Invalid booking ID");
+    throw error;
   }
 });
 
@@ -687,7 +753,7 @@ export const garageBookingList = asyncHandler(async (req, res) => {
       throw new ApiError(403, "UNAUTHORIZED_ACCESS");
     }
 
-    query["paymentDetails.status"] = { $ne: "PENDING" };
+    query["paymentDetails.status"] = { $ne: "FAILED" };
 
     const bookings = await GarageBooking.find(query)
       .populate<{ garageId: IGarage & { owner: IMerchant } }>({

@@ -323,15 +323,20 @@ export const checkoutResidence = asyncHandler(async (req, res) => {
 const verifyCouponCode = (c: string) => c.startsWith("XES") ? 0.1 : 0;
 
 export const verifyResidenceBooking = asyncHandler(async (req, res) => {
-  let session: mongoose.ClientSession | undefined;
+  let session: mongoose.ClientSession | null = null;
+
   try {
     const { bookingId, carLicensePlateImage, paymentMethod } = req.body;
     const isCashPayment = paymentMethod === "CASH";
 
-    if (!(bookingId && carLicensePlateImage)) throw new ApiError(400, "NO_BOOKINGID");
+    if (!bookingId || !carLicensePlateImage) {
+      throw new ApiError(400, "NO_BOOKINGID");
+    }
 
     const verifiedUser = await verifyAuthentication(req);
-    if (!(verifiedUser?.userType === "user")) throw new ApiError(401, "User must be a verified user");
+    if (verifiedUser?.userType !== "user") {
+      throw new ApiError(401, "User must be a verified user");
+    }
 
     const booking = await ResidenceBookingModel.findById(bookingId);
     if (!booking) throw new ApiError(404, "Booking not found");
@@ -340,46 +345,126 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
       throw new ApiError(401, "User is not authorized to book this slot");
     }
 
-    if (booking.paymentDetails?.status === "SUCCESS" && booking.paymentDetails.transactionId) {
+    if (booking.paymentDetails?.status === "SUCCESS") {
       throw new ApiError(400, "USER ALREADY PAID AND BOOKED");
     }
 
+    // 🔥 Start transaction
     session = await mongoose.startSession();
     session.startTransaction();
 
     const bookingFrom = new Date(booking.bookingPeriod.from);
     const bookingTo = new Date(booking.bookingPeriod.to);
-    const isBooking = await findBookedResidenceIn(bookingFrom, bookingTo, booking.residenceId.toString());
 
-    // ✅ Skip Stripe verification for CASH payments
-    if (!isCashPayment) {
-      if (!booking.paymentDetails.StripePaymentDetails?.paymentIntentId) {
-        throw new ApiError(400, "NO STRIPE RECORD FOUND");
-      }
-      const stripRes = await verifyStripePayment(
-        booking.paymentDetails.StripePaymentDetails.paymentIntentId
-      );
-      if (!stripRes.success) throw new ApiError(400, "UNSUCESSFUL_TRANSACTION");
+    const isBooking = await findBookedResidenceIn(
+      bookingFrom,
+      bookingTo,
+      booking.residenceId.toString()
+    );
+
+    // ❌ Slot already booked
+    if (isBooking.length > 0) {
+      booking.paymentDetails.status = "FAILED";
+      await booking.save({ session });
+      await session.abortTransaction();
+      throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
 
+    // ✅ Common updates
+    booking.vehicleNumber = carLicensePlateImage;
+    booking.paymentDetails.method = isCashPayment ? "CASH" : "STRIPE";
     booking.paymentDetails.paidAt = new Date();
 
-    if (isBooking.length > 0) {
+    // ✅ Payment handling
+    if (isCashPayment) {
+      booking.paymentDetails.status = "PENDING";
+    } else {
+      booking.paymentDetails.status = "SUCCESS";
+    }
+
+    await booking.save({ session });
+
+    await session.commitTransaction();
+
+    return res.status(201).json(
+      new ApiResponse(201, {
+        booking,
+        message: isCashPayment
+          ? "Booking created. Awaiting cash payment confirmation."
+          : "Booking successful",
+        paymentStatus: booking.paymentDetails.status,
+        paymentMethod: booking.paymentDetails.method,
+      })
+    );
+  } catch (err) {
+    if (session) await session.abortTransaction();
+    console.error(err);
+    throw err;
+  } finally {
+    if (session) session.endSession();
+  }
+});
+
+
+
+export const confirmCashPaymentResidence = asyncHandler(async (req: Request, res: Response) => {
+  try {
+    const bookingId    = z.string().parse(req.params.id);
+    const verifiedAuth = await verifyAuthentication(req);
+ 
+    if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
+      throw new ApiError(403, "Only merchants can confirm cash payments");
+    }
+ 
+    const booking = await ResidenceBookingModel.findById(bookingId);
+    if (!booking) throw new ApiError(404, "BOOKING_NOT_FOUND");
+ 
+    if (booking.paymentDetails.method !== "CASH") {
+      throw new ApiError(400, "This booking is not a cash payment");
+    }
+    if (booking.paymentDetails.status === "SUCCESS") {
+      throw new ApiError(400, "Cash payment has already been confirmed");
+    }
+    if (booking.paymentDetails.status === "FAILED") {
+      throw new ApiError(400, "This booking has been cancelled");
+    }
+ 
+    // Verify merchant owns this residence
+    const residence = await ResidenceModel.findById(booking.residenceId);
+    if (!residence) throw new ApiError(404, "RESIDENCE_NOT_FOUND");
+    if (residence.owner.toString() !== verifiedAuth.user._id.toString()) {
+      throw new ApiError(403, "You do not own this residence");
+    }
+ 
+    // Final availability check
+    const conflict = await findBookedResidenceIn(
+      new Date(booking.bookingPeriod.from as unknown as string),
+      new Date(booking.bookingPeriod.to   as unknown as string),
+      bookingId  // ← pass the id so this booking is excluded via the SUCCESS filter
+    );
+    // findBookedResidenceIn only returns SUCCESS bookings so no self-conflict
+    if (conflict.length > 0) {
       booking.paymentDetails.status = "FAILED";
       await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
-
-    booking.vehicleNumber = carLicensePlateImage;
+ 
     booking.paymentDetails.status = "SUCCESS";
-    booking.paymentDetails.method = isCashPayment ? "CASH" : "STRIPE";
+    booking.paymentDetails.paidAt = new Date();
     await booking.save();
-    await session.commitTransaction();
-
-    res.status(201).json(new ApiResponse(201, { booking }));
-  } catch (err) {
-    console.log(err);
-    throw err;
+ 
+    res.status(200).json(
+      new ApiResponse(200, {
+        bookingId,
+        residenceId:   booking.residenceId,
+        confirmedAt:   booking.paymentDetails.paidAt,
+        paymentMethod: "CASH",
+        paymentStatus: "SUCCESS",
+      }, "Cash payment confirmed. Residence booking is now active.")
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) throw new ApiError(400, "Invalid booking ID");
+    throw error;
   }
 });
 
@@ -480,7 +565,7 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
       throw new ApiError(403, 'UNAUTHORIZED_ACCESS');
     }
 
-    query["paymentDetails.status"] = { $ne: "PENDING" };
+    query["paymentDetails.status"] = { $ne: "FAILED" };
     console.log("query at residence:", query);
 
     const bookings = await ResidenceBookingModel.find(query)

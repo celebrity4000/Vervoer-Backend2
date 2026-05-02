@@ -11,6 +11,7 @@ import {
   lotCheckOut,
   registerParkingLot,
   markSlotVacant,
+  confirmCashPaymentLot,
 } from "../controllers/merchant.parkinglot.controller.js";
 import { imageUpload } from "../middleware/upload.middleware.js";
 import {
@@ -25,7 +26,8 @@ import {
   getListOfGarage,
   registerGarage,
   scanBookingQRCode,
-  markGarageSlotVacant, // ✅ NEW
+  markGarageSlotVacant,
+  confirmCashPaymentGarage, // ✅ NEW
 } from "../controllers/merchant.garage.controller.js";
 import {
   addResidence,
@@ -38,7 +40,8 @@ import {
   checkoutResidence,
   residenceBookingInfo,
   residenceBookingList,
-  markResidenceSlotVacant, // ✅ NEW
+  markResidenceSlotVacant,
+  confirmCashPaymentResidence, // ✅ NEW
 } from "../controllers/merchant.residence.controller.js";
 import { imageUploadFields } from "../middleware/upload.middleware.js";
 import { getMerchantStats } from "../controllers/Merchant.stats.controller.js";
@@ -61,6 +64,7 @@ merchantRouter.get("/parkinglot/booking/:id", getLotBookingById);
 merchantRouter.patch("/parkinglot/booking/:id/mark-vacant", markSlotVacant);       // ✅ existing
 merchantRouter.get("/parkinglot/search", getListOfParkingLot);
 merchantRouter.get("/parkinglot/:id", getParkingLotbyId);
+merchantRouter.patch("/parkinglot/booking/:id/confirm-cash", confirmCashPaymentLot);
 
 // ── Garage ────────────────────────────────────────────────────────────────────
 merchantRouter.post("/garage/registration", imageUpload.array("images", 10), registerGarage);
@@ -75,6 +79,7 @@ merchantRouter.get("/garage/booking/:id", garageBookingInfo);
 merchantRouter.patch("/garage/booking/:id/mark-vacant", markGarageSlotVacant);     // ✅ NEW
 merchantRouter.get("/garage/:id", getGarageDetails);
 merchantRouter.get("/api/garage-booking/scan/:id", scanBookingQRCode);
+merchantRouter.patch("/garage/booking/:id/confirm-cash", confirmCashPaymentGarage)
 
 // ── Residence ─────────────────────────────────────────────────────────────────
 merchantRouter.post("/residence/registration", imageUpload.array("images", 10), addResidence);
@@ -91,7 +96,7 @@ merchantRouter.get("/residence/:residenceId", getResidenceById);
 merchantRouter.get("/stats", getMerchantStats);
 merchantRouter.patch("/monthly-settings", updateMonthlySettings);
 merchantRouter.get("/dry-cleaner-stats", getDryCleanerStats);
-
+merchantRouter.patch("/residence/booking/:id/confirm-cash", confirmCashPaymentResidence);
 
 merchantRouter.post("/sub-account/login", subAccountLogin);
  merchantRouter.use("/sub-accounts", (req, res, next) => {
