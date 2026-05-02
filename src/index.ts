@@ -8,7 +8,7 @@ import userRoutes from "./routes/routes.js";
 import merchantRouter from "./routes/merchant.routes.js";
 import { ApiResponse } from "./utils/apirespone.js";
 import { StripePublicKey } from "./utils/stripePayments.js";
-import { startBookingCleanupJob } from "./utils/bookingCleanup.js"; 
+import { startBookingCleanupJob } from "./utils/bookingCleanup.js";
 
 dotenv.config({ path: "./.env" });
 
@@ -17,8 +17,13 @@ const httpServer = createServer(app);
 
 console.log("🔑 Stripe key in use:", process.env.STRIPE_SECRET_KEY?.substring(0, 20));
 
+// ✅ Added vervoer-merchant-dashboad.vercel.app to allowed origins
 app.use(cors({
-  origin: ["http://localhost:5173", "https://admin-self-seven-79.vercel.app"],
+  origin: [
+    "http://localhost:5173",
+    "https://admin-self-seven-79.vercel.app",
+    "https://vervoer-merchant-dashboad.vercel.app",   // ← merchant web dashboard
+  ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true,
 }));
@@ -33,7 +38,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api/users", userRoutes);
 app.use("/api/merchants", merchantRouter);
 
-// ✅ Single Stripe key endpoint (removed duplicate)
+// ✅ Single Stripe key endpoint
 app.get("/api/getStripePublicKey", (req, res) => {
   try {
     if (!StripePublicKey) {
@@ -73,7 +78,7 @@ connectDB()
     httpServer.listen(PORT, () => {
       console.log("Server with Socket.io started at", PORT);
     });
-    startBookingCleanupJob(); // ✅ starts after DB is ready
+    startBookingCleanupJob();
   })
   .catch((err) => {
     console.error("MongoDB connection error:", err);
