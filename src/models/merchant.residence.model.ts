@@ -104,6 +104,52 @@ const residenceSchema = new mongoose.Schema<IResident, mongoose.Model<IResident>
 residenceSchema.index({ gpsLocation: "2dsphere" });
 export const ResidenceModel = mongoose.model("Residence", residenceSchema);
 
+// ── Extension subdocument schema ──────────────────────────────────────────────
+// Mirrors the shape used by Garage and Lot booking models.
+// paymentStatus lifecycle:
+//   CASH   → PENDING  (merchant confirms via confirm-cash → SUCCESS)
+//   CREDIT → AWAITING_CONFIRMATION  (user confirms via /extend/confirm → SUCCESS)
+const extensionSchema = new mongoose.Schema(
+  {
+    requestedAt:    { type: Date, default: Date.now },
+    extraHours:     { type: Number, required: true },
+    previousTo:     { type: Date, required: true },
+    newTo:          { type: Date, required: true },
+    hourlyRate:     { type: Number, required: true },
+    doubleRate:     { type: Number, required: true },
+    baseAmount:     { type: Number, required: true },
+    serviceFee:     { type: Number, required: true },
+    transactionFee: { type: Number, required: true },
+    estimatedTaxes: { type: Number, required: true },
+    totalAmount:    { type: Number, required: true },
+    paymentMethod: {
+      type: String,
+      enum: ["CASH", "CREDIT", "UPI"],
+      required: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["PENDING", "AWAITING_CONFIRMATION", "SUCCESS", "FAILED"],
+      default: "PENDING",
+    },
+    paymentIntentId: { type: String, default: null },
+    activatedAt:     { type: Date, default: null },
+    stripeDetails: {
+      type: new mongoose.Schema(
+        {
+          paymentIntent:   { type: String },
+          ephemeralKey:    { type: String },
+          paymentIntentId: { type: String },
+          customerId:      { type: String },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
+  },
+  { _id: true, timestamps: false }
+);
+
 export interface IResidenceBooking {
   residenceId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
@@ -118,7 +164,8 @@ export interface IResidenceBooking {
   discount: number;
   priceRate: number;
   isMonthly?: boolean;
-months?: number;
+  months?: number;
+  extensions?: any[];   // ← added
   paymentDetails: {
     transactionId?: string;
     amount: number;
@@ -148,7 +195,11 @@ const residenceBookingSchema = new mongoose.Schema<IResidenceBooking>(
     discount: { type: Number, default: 0 },
     priceRate: { type: Number, required: true },
     isMonthly: { type: Boolean, default: false },
-months: { type: Number, default: null },
+    months: { type: Number, default: null },
+
+    // ── THE FIX: extensions array ─────────────────────────────────────────
+    extensions: { type: [extensionSchema], default: [] },
+
     paymentDetails: {
       transactionId: String,
       amount: Number,

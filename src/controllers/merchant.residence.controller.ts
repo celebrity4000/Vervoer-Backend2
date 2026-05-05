@@ -114,7 +114,6 @@ async function findBookedResidenceIn(startDate: Date, endDate: Date, id?: string
 
   const q: mongoose.FilterQuery<IResidenceBooking> = {
     "paymentDetails.status": "SUCCESS",
-    // ✅ Only consider bookings that haven't ended yet
     "bookingPeriod.to": { $gt: now },
     "bookingPeriod.from": { $lt: endDate },
     "bookingPeriod.to": { $gt: startDate },
@@ -164,7 +163,6 @@ const CheckOutResidenceData = z.object({
   months: z.coerce.number().int().min(1).max(12).optional().default(1),
 });
 
-// ✅ Updated CBookingData: replaced platformCharge with three new fee fields
 interface CBookingData {
   bookingPeriod: { to: Date; from: Date };
   totalAmount: number;
@@ -175,9 +173,9 @@ interface CBookingData {
   transactionFee: number;
   estimatedTaxes: number;
   vehicleNumber?: string;
-  isMonthly: boolean;       // ← ADD
-  months?: number;          // ← ADD
-  priceRate: number;        // ← ADD (so it's explicit)
+  isMonthly: boolean;
+  months?: number;
+  priceRate: number;
 }
 
 async function createABooking(
@@ -191,8 +189,8 @@ async function createABooking(
     customerId: user._id,
     ...data,
     priceRate: residence.price,
-    isMonthly: data.isMonthly,        // ← ADD
-    months: data.isMonthly ? data.months : undefined,  // ← ADD
+    isMonthly: data.isMonthly,
+    months: data.isMonthly ? data.months : undefined,
     paymentDetails: {
       amount: data.amountToPaid,
       paymentGateway: "STRIPE",
@@ -218,8 +216,8 @@ async function createABooking(
       couponApplied: booking.couponCode !== undefined,
       couponDetails: booking.couponCode || null,
       totalAmount: booking.amountToPaid,
-      isMonthly: data.isMonthly,                        // ← ADD
-      months: data.isMonthly ? data.months : undefined, // ← ADD
+      isMonthly: data.isMonthly,
+      months: data.isMonthly ? data.months : undefined,
     },
     stripeDetails: booking.paymentDetails.StripePaymentDetails,
     placeInfo: {
@@ -232,6 +230,16 @@ async function createABooking(
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// checkoutResidence
+//
+// ✅ CHANGED: initPayment now receives the merchant's stripeAccountId so that
+//    on payment success Stripe automatically splits:
+//      • merchantPayout  → merchant's Connect account
+//      • platform fee    → your admin Stripe account (the remainder)
+//    Falls back to plain PaymentIntent if merchant hasn't completed KYC.
+// ─────────────────────────────────────────────────────────────────────────────
+
 export const checkoutResidence = asyncHandler(async (req, res) => {
   try {
     const verifiedAuth = await verifyAuthentication(req);
@@ -243,6 +251,7 @@ export const checkoutResidence = asyncHandler(async (req, res) => {
 
     if (ed <= sd) throw new ApiError(400, "WRONG_DATE");
 
+    // ✅ Populate owner so we can access stripeAccountId
     const residence = await ResidenceModel.findById(rData.residenceId)
       .populate<{ owner: IMerchant }>("owner", "-password");
     if (!residence) throw new ApiError(400, "WRONG_RESIDENCE_ID");
@@ -250,7 +259,6 @@ export const checkoutResidence = asyncHandler(async (req, res) => {
     const isBooked = await findBookedResidenceIn(sd, ed, rData.residenceId);
     if (isBooked.length !== 0) throw new ApiError(400, "NOT_AVAILABLE");
 
-    // ── Monthly flags ──────────────────────────────────────────────────────
     const isMonthly = rData.isMonthly ?? false;
     const months    = rData.months    ?? 1;
 
@@ -280,8 +288,7 @@ export const checkoutResidence = asyncHandler(async (req, res) => {
     const estimatedTaxes = totalAmount * 0.15;
     const amountToPaid   = totalAmount + serviceFee + transactionFee + estimatedTaxes - discount;
 
-    // ── Stripe customer (same pattern as garage) ───────────────────────────
-    const { validateOrCreateCustomer } = await import("../utils/stripePayments.js");
+    // ── Stripe customer ────────────────────────────────────────────────────
     const validCustomerId = await validateOrCreateCustomer(
       verifiedAuth.user.stripeCustomerId,
       `${verifiedAuth.user.firstName} ${verifiedAuth.user.lastName}`,
@@ -291,7 +298,17 @@ export const checkoutResidence = asyncHandler(async (req, res) => {
       await User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId: validCustomerId });
     }
 
-    const paymentDetails = await initPayment(amountToPaid, validCustomerId);
+    // ✅ Pass merchant's stripeAccountId → destination charge to merchant
+    // Platform keeps (serviceFee + transactionFee + estimatedTaxes).
+    // Merchant receives baseAmount automatically via Stripe Connect.
+    const merchantStripeAccountId = (residence.owner as IMerchant).stripeAccountId ?? null;
+
+    const paymentDetails = await initPayment(
+      amountToPaid,
+      validCustomerId,
+      "usd",
+      merchantStripeAccountId,
+    );
 
     const response = await createABooking(
       {
@@ -349,7 +366,6 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
       throw new ApiError(400, "USER ALREADY PAID AND BOOKED");
     }
 
-    // 🔥 Start transaction
     session = await mongoose.startSession();
     session.startTransaction();
 
@@ -362,7 +378,6 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
       booking.residenceId.toString()
     );
 
-    // ❌ Slot already booked
     if (isBooking.length > 0) {
       booking.paymentDetails.status = "FAILED";
       await booking.save({ session });
@@ -370,12 +385,10 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
 
-    // ✅ Common updates
     booking.vehicleNumber = carLicensePlateImage;
     booking.paymentDetails.method = isCashPayment ? "CASH" : "STRIPE";
     booking.paymentDetails.paidAt = new Date();
 
-    // ✅ Payment handling
     if (isCashPayment) {
       booking.paymentDetails.status = "PENDING";
     } else {
@@ -383,7 +396,6 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
     }
 
     await booking.save({ session });
-
     await session.commitTransaction();
 
     return res.status(201).json(
@@ -405,20 +417,18 @@ export const verifyResidenceBooking = asyncHandler(async (req, res) => {
   }
 });
 
-
-
 export const confirmCashPaymentResidence = asyncHandler(async (req: Request, res: Response) => {
   try {
     const bookingId    = z.string().parse(req.params.id);
     const verifiedAuth = await verifyAuthentication(req);
- 
+
     if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can confirm cash payments");
     }
- 
+
     const booking = await ResidenceBookingModel.findById(bookingId);
     if (!booking) throw new ApiError(404, "BOOKING_NOT_FOUND");
- 
+
     if (booking.paymentDetails.method !== "CASH") {
       throw new ApiError(400, "This booking is not a cash payment");
     }
@@ -428,31 +438,28 @@ export const confirmCashPaymentResidence = asyncHandler(async (req: Request, res
     if (booking.paymentDetails.status === "FAILED") {
       throw new ApiError(400, "This booking has been cancelled");
     }
- 
-    // Verify merchant owns this residence
+
     const residence = await ResidenceModel.findById(booking.residenceId);
     if (!residence) throw new ApiError(404, "RESIDENCE_NOT_FOUND");
     if (residence.owner.toString() !== verifiedAuth.user._id.toString()) {
       throw new ApiError(403, "You do not own this residence");
     }
- 
-    // Final availability check
+
     const conflict = await findBookedResidenceIn(
       new Date(booking.bookingPeriod.from as unknown as string),
       new Date(booking.bookingPeriod.to   as unknown as string),
-      bookingId  // ← pass the id so this booking is excluded via the SUCCESS filter
+      bookingId
     );
-    // findBookedResidenceIn only returns SUCCESS bookings so no self-conflict
     if (conflict.length > 0) {
       booking.paymentDetails.status = "FAILED";
       await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
- 
+
     booking.paymentDetails.status = "SUCCESS";
     booking.paymentDetails.paidAt = new Date();
     await booking.save();
- 
+
     res.status(200).json(
       new ApiResponse(200, {
         bookingId,
@@ -582,7 +589,7 @@ export const residenceBookingList = asyncHandler(async (req, res) => {
     console.log("found Residence booking:", bookings.length);
     const formattedBookings = bookings.map(booking => ({
       _id: booking._id,
-      createdAt: booking.createdAt,   
+      createdAt: booking.createdAt,
       residence: {
         _id: booking.residenceId?._id,
         name: booking.residenceId?.residenceName,
@@ -629,51 +636,40 @@ export const deleteResidenceBooking = asyncHandler(async (req: Request, res: Res
   res.status(200).json(new ApiResponse(200, null, "Booking cancelled successfully"));
 });
 
-
 export const markResidenceSlotVacant = asyncHandler(async (req: Request, res: Response) => {
   try {
     const bookingId = z.string().parse(req.params.id);
     const verifiedAuth = await verifyAuthentication(req);
- 
+
     if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can mark a slot vacant");
     }
- 
+
     const booking = await ResidenceBookingModel.findById(bookingId);
-    if (!booking) {
-      throw new ApiError(404, "BOOKING_NOT_FOUND");
-    }
- 
-    // Must be a paid booking
+    if (!booking) throw new ApiError(404, "BOOKING_NOT_FOUND");
+
     if (booking.paymentDetails.status !== "SUCCESS") {
       throw new ApiError(400, "Only confirmed (SUCCESS) bookings can be vacated");
     }
- 
+
     const now = new Date();
- 
-    // Must still be within the booked period
+
     if (new Date(booking.bookingPeriod.to as unknown as string) <= now) {
       throw new ApiError(400, "Booking has already expired — slot is already free");
     }
- 
-    // Verify the merchant owns the residence this booking belongs to
+
     const residence = await ResidenceModel.findById(booking.residenceId);
-    if (!residence) {
-      throw new ApiError(404, "RESIDENCE_NOT_FOUND");
-    }
+    if (!residence) throw new ApiError(404, "RESIDENCE_NOT_FOUND");
     if (residence.owner.toString() !== verifiedAuth.user._id.toString()) {
       throw new ApiError(403, "You do not own this residence");
     }
- 
-    // Check if already vacated early
+
     if ((booking as any).earlyCheckOut) {
       throw new ApiError(400, "Slot has already been marked vacant");
     }
- 
+
     const originalTo = booking.bookingPeriod.to;
- 
-    // ✅ Shrink bookingPeriod.to to now → slot freed immediately for new bookings
-    // ✅ Record audit trail in earlyCheckOut
+
     await ResidenceBookingModel.findByIdAndUpdate(bookingId, {
       $set: {
         "bookingPeriod.to": now,
@@ -684,23 +680,17 @@ export const markResidenceSlotVacant = asyncHandler(async (req: Request, res: Re
         },
       },
     });
- 
+
     res.status(200).json(
-      new ApiResponse(
-        200,
-        {
-          bookingId,
-          residenceId: booking.residenceId,
-          markedVacantAt: now,
-          originalCheckOut: originalTo,
-        },
-        "Residence marked vacant successfully. It is now available for new bookings.",
-      ),
+      new ApiResponse(200, {
+        bookingId,
+        residenceId: booking.residenceId,
+        markedVacantAt: now,
+        originalCheckOut: originalTo,
+      }, "Residence marked vacant successfully. It is now available for new bookings.")
     );
   } catch (error) {
-    if (error instanceof z.ZodError) {
-      throw new ApiError(400, "Invalid booking ID");
-    }
+    if (error instanceof z.ZodError) throw new ApiError(400, "Invalid booking ID");
     throw error;
   }
 });

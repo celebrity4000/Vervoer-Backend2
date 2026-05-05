@@ -86,7 +86,6 @@ const CheckoutData = z
       .enum(["CASH", "CREDIT", "DEBIT", "UPI", "PAYPAL"])
       .optional(),
     vehicleNumber: z.string().min(5).optional(),
-    // ── Monthly booking ───────────────────────────────────────
     isMonthly: z.coerce.boolean().optional().default(false),
     months: z.coerce.number().int().min(1).max(12).optional().default(1),
   })
@@ -123,9 +122,9 @@ function computeGaragePricing(
   months: number,
   bookingFrom: Date,
   bookingTo: Date,
-  zonePrice: number,           // per-hour price from spacesList
+  zonePrice: number,
   garageMonthlyEnabled: boolean,
-  garageMonthlyRate: number,   // flat monthly rate set by merchant (0 = not set)
+  garageMonthlyRate: number,
   discount: number
 ) {
   let totalHours: number;
@@ -133,9 +132,7 @@ function computeGaragePricing(
   let totalAmount: number;
 
   if (isMonthly) {
-    // 730 h = average hours in a calendar month (365 × 24 / 12)
     totalHours = months * 730;
-    // Prefer the merchant's dedicated monthly rate; fall back to hourly × 730
     const useFlat = garageMonthlyEnabled && garageMonthlyRate > 0;
     baseRate    = useFlat ? garageMonthlyRate : zonePrice * 730;
     totalAmount = baseRate * months;
@@ -283,7 +280,12 @@ export const getAvailableGarageSlots = asyncHandler(async (req: Request, res: Re
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Checkout — create a pending booking with Stripe / cash details
+// Checkout — create a pending booking with Stripe Connect destination charge
+//
+// ✅ CHANGED: initPayment now receives the merchant's stripeAccountId so that
+//    on payment success Stripe automatically splits:
+//      • merchantPayout  → merchant's Connect account
+//      • platform fee    → your admin Stripe account (the remainder)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Response) => {
@@ -295,6 +297,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
 
     const rData = CheckoutData.parse(req.body);
 
+    // ── Populate owner so we can access stripeAccountId ───────────────────
     const garage = await Garage.findById(rData.garageId).populate<{ owner: IMerchant }>("owner", "-password");
     if (!garage) throw new ApiError(404, "GARAGE_NOT_FOUND");
 
@@ -312,7 +315,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     });
     if (isNotAvailableSlot) throw new ApiError(400, "SLOT_NOT_AVAILABLE");
 
-    // ── Extract monthly flags ──────────────────────────────────────────────
     const isMonthly = rData.isMonthly ?? false;
     const months    = rData.months    ?? 1;
 
@@ -324,7 +326,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     if (rData.couponCode) {
       const valid = await validateCoupon(rData.couponCode, verifiedAuth.user as any);
       if (valid) {
-        // coupon is computed after totalAmount is known — pass 0 now, recalculate below
         couponApplied = true;
         couponDetails = { code: rData.couponCode, discountPercentage: 10 };
       }
@@ -334,13 +335,12 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
     const startDate = new Date(rData.bookingPeriod.from);
     const endDate   = new Date(rData.bookingPeriod.to);
 
-    // Compute totalAmount first (without discount) so we can derive the coupon amount
     const preliminary = computeGaragePricing(
       isMonthly, months, startDate, endDate,
       selectedZone.price,
       garage.monthlyChargeEnabled ?? false,
       garage.monthlyRate          ?? 0,
-      0 // discount not yet applied
+      0
     );
 
     if (couponApplied) {
@@ -363,6 +363,7 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
 
     if (rData.paymentMethod === "CREDIT") {
       paymentGateway = "STRIPE";
+
       const validCustomerId = await validateOrCreateCustomer(
         verifiedAuth.user.stripeCustomerId,
         `${verifiedAuth.user.firstName} ${verifiedAuth.user.lastName}`,
@@ -371,7 +372,20 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       if (validCustomerId !== verifiedAuth.user.stripeCustomerId) {
         await User.findByIdAndUpdate(verifiedAuth.user._id, { stripeCustomerId: validCustomerId });
       }
-      stripeDetails = await initPayment(amountToPaid, validCustomerId);
+
+      // ✅ Pass merchant's stripeAccountId → triggers destination charge
+      // The platform keeps (serviceFee + transactionFee + estimatedTaxes).
+      // The merchant receives baseAmount automatically via Stripe Connect.
+      // Falls back to plain PaymentIntent if merchant hasn't completed KYC.
+      const merchantStripeAccountId = (garage.owner as IMerchant).stripeAccountId ?? null;
+
+      stripeDetails = await initPayment(
+        amountToPaid,
+        validCustomerId,
+        "usd",
+        merchantStripeAccountId,
+      );
+
     } else if (rData.paymentMethod === "UPI") {
       paymentGateway = "UPI";
     } else {
@@ -411,7 +425,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
       amountToPaid,
       priceRate:     baseRate,
       paymentDetails: paymentDetailsData,
-      // ── Monthly ───────────────────────────────────────────
       isMonthly,
       months: isMonthly ? months : undefined,
       ...(couponApplied && { couponCode: rData.couponCode }),
@@ -434,7 +447,6 @@ export const checkoutGarageSlot = asyncHandler(async (req: Request, res: Respons
         couponApplied,
         couponDetails:  couponApplied ? couponDetails : null,
         totalAmount:    amountToPaid,
-        // ── Monthly ─────────────────────────────────────────
         isMonthly,
         months:         isMonthly ? months : undefined,
       },
@@ -487,21 +499,18 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
     }
 
     if (paymentMethod === "CASH") {
-  // Record the vehicle image and method, but leave status PENDING
-  // Merchant confirms via PATCH /merchants/garage/booking/:id/confirm-cash
-  booking.paymentDetails.method = "CASH";
-  booking.vehicleImage          = carLicensePlateImage;
-  await booking.save();
-  return res.status(200).json(new ApiResponse(200, {
-    message:       "Booking created. Awaiting merchant cash payment confirmation.",
-    bookingId:     booking._id,
-    paymentStatus: "PENDING",
-    paymentMethod: "CASH",
-    slot:          booking.bookedSlot,
-    vehicleNumber: booking.vehicleNumber,
-  }));
-}
-
+      booking.paymentDetails.method = "CASH";
+      booking.vehicleImage          = carLicensePlateImage;
+      await booking.save();
+      return res.status(200).json(new ApiResponse(200, {
+        message:       "Booking created. Awaiting merchant cash payment confirmation.",
+        bookingId:     booking._id,
+        paymentStatus: "PENDING",
+        paymentMethod: "CASH",
+        slot:          booking.bookedSlot,
+        vehicleNumber: booking.vehicleNumber,
+      }));
+    }
 
     if (paymentMethod === "CREDIT" || paymentMethod === "CARD") {
       if (!paymentIntentId) throw new ApiError(400, "PAYMENT_INTENT_REQUIRED");
@@ -530,19 +539,18 @@ export const bookGarageSlot = asyncHandler(async (req: Request, res: Response) =
   }
 });
 
-
 export const confirmCashPaymentGarage = asyncHandler(async (req: Request, res: Response) => {
   try {
     const bookingId    = z.string().parse(req.params.id);
     const verifiedAuth = await verifyAuthentication(req);
- 
+
     if (!verifiedAuth?.user || verifiedAuth.userType !== "merchant") {
       throw new ApiError(403, "Only merchants can confirm cash payments");
     }
- 
+
     const booking = await GarageBooking.findById(bookingId);
     if (!booking) throw new ApiError(404, "BOOKING_NOT_FOUND");
- 
+
     if (booking.paymentDetails.method !== "CASH") {
       throw new ApiError(400, "This booking is not a cash payment");
     }
@@ -552,15 +560,13 @@ export const confirmCashPaymentGarage = asyncHandler(async (req: Request, res: R
     if (booking.paymentDetails.status === "FAILED") {
       throw new ApiError(400, "This booking has been cancelled");
     }
- 
-    // Verify merchant owns this garage
+
     const garage = await Garage.findById(booking.garageId);
     if (!garage) throw new ApiError(404, "GARAGE_NOT_FOUND");
     if (garage.owner.toString() !== verifiedAuth.user._id.toString()) {
       throw new ApiError(403, "You do not own this garage");
     }
- 
-    // Final slot conflict check
+
     const conflict = await GarageBooking.findOne({
       _id:                     { $ne: booking._id },
       garageId:                booking.garageId,
@@ -574,11 +580,11 @@ export const confirmCashPaymentGarage = asyncHandler(async (req: Request, res: R
       await booking.save();
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
- 
+
     booking.paymentDetails.status = "SUCCESS";
     booking.paymentDetails.paidAt = new Date();
     await booking.save();
- 
+
     res.status(200).json(
       new ApiResponse(200, {
         bookingId,

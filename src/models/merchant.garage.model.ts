@@ -34,7 +34,6 @@ export interface IGarage {
   coveredDrivewayAvailable: boolean;
   coveredDrivewayTypes?: string[];
   securityCamera: boolean;
-  // ── Monthly plan ─────────────────────────────────────────
   monthlyChargeEnabled: boolean;
   monthlyRate: number;
 }
@@ -88,7 +87,6 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
     coveredDrivewayAvailable: { type: Boolean, default: false },
     coveredDrivewayTypes: { type: [String], default: undefined },
     securityCamera: { type: Boolean, default: false },
-    // ── Monthly plan ─────────────────────────────────────────
     monthlyChargeEnabled: { type: Boolean, default: false },
     monthlyRate: { type: Number, default: 0 },
   },
@@ -125,6 +123,48 @@ const garageSchema = new mongoose.Schema<IGarage, mongoose.Model<IGarage>, Garag
 
 garageSchema.index({ location: '2dsphere' });
 
+// ── Extension subdocument schema ──────────────────────────────────────────────
+const extensionSchema = new mongoose.Schema(
+  {
+    requestedAt:    { type: Date, default: Date.now },
+    extraHours:     { type: Number, required: true },
+    previousTo:     { type: Date, required: true },
+    newTo:          { type: Date, required: true },
+    hourlyRate:     { type: Number, required: true },
+    doubleRate:     { type: Number, required: true },
+    baseAmount:     { type: Number, required: true },
+    serviceFee:     { type: Number, required: true },
+    transactionFee: { type: Number, required: true },
+    estimatedTaxes: { type: Number, required: true },
+    totalAmount:    { type: Number, required: true },
+    paymentMethod:  {
+      type: String,
+      enum: ["CASH", "CREDIT", "UPI"],
+      required: true,
+    },
+    paymentStatus: {
+      type: String,
+      enum: ["PENDING", "AWAITING_CONFIRMATION", "SUCCESS", "FAILED"],
+      default: "PENDING",
+    },
+    paymentIntentId: { type: String, default: null },
+    activatedAt:     { type: Date, default: null },
+    stripeDetails: {
+      type: new mongoose.Schema(
+        {
+          paymentIntent:   { type: String },
+          ephemeralKey:    { type: String },
+          paymentIntentId: { type: String },
+          customerId:      { type: String },
+        },
+        { _id: false }
+      ),
+      default: undefined,
+    },
+  },
+  { _id: true, timestamps: false }
+);
+
 interface IGarageBooking {
   garageId: mongoose.Types.ObjectId;
   customerId: mongoose.Types.ObjectId;
@@ -139,9 +179,10 @@ interface IGarageBooking {
   couponCode?: string;
   discount: number;
   priceRate: number;
-  vehicleImage?: string;   
-  isMonthly?: boolean;          // ← ADD
-  months?: number;                   
+  vehicleImage?: string;
+  isMonthly?: boolean;
+  months?: number;
+  extensions?: any[];   // ← added
   paymentDetails: {
     transactionId?: string;
     amount: number;
@@ -174,6 +215,10 @@ const garageBookingSchema = new mongoose.Schema<IGarageBooking>(
     isMonthly: { type: Boolean, default: false },
     months: { type: Number, default: null },
     vehicleImage: { type: String, default: null },
+
+    // ── THE FIX: extensions array ─────────────────────────────────────────
+    extensions: { type: [extensionSchema], default: [] },
+
     paymentDetails: {
       transactionId: String,
       amount: Number,

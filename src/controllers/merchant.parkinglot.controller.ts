@@ -226,14 +226,21 @@ const updateACheckout = async (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// createABooking — ✅ isCash param added, skips Stripe for cash
+// createABooking
+//
+// ✅ CHANGED: now accepts the merchant's stripeAccountId and passes it to
+//    initPayment so Stripe automatically splits the charge:
+//      • merchantPayout  → merchant's Connect account
+//      • platform fee    → your admin Stripe account (the remainder)
+//    Falls back to a plain PaymentIntent when merchant hasn't completed KYC.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const createABooking = async (
-  data:   LotCheckOutData,
-  lotDoc: MParkingRes & { owner: IMerchant },
-  user:   MUserRes,
-  isCash: boolean = false  // ✅ NEW
+  data:                    LotCheckOutData,
+  lotDoc:                  MParkingRes & { owner: IMerchant },
+  user:                    MUserRes,
+  isCash:                  boolean = false,
+  merchantStripeAccountId: string | null = null, // ✅ NEW
 ) => {
   const bookingFrom = new Date(data.bookingPeriod.from);
   const bookingTo   = new Date(data.bookingPeriod.to);
@@ -255,7 +262,7 @@ const createABooking = async (
   const isMonthly = data.isMonthly ?? false;
   const months    = data.months    ?? 1;
 
-  // ── ✅ Skip Stripe entirely for cash bookings ─────────────────────────────
+  // ── Skip Stripe entirely for cash bookings ────────────────────────────────
   let stripeDetails: any = null;
 
   if (!isCash) {
@@ -278,10 +285,17 @@ const createABooking = async (
       await User.findByIdAndUpdate(user._id, { stripeCustomerId });
     }
 
-    stripeDetails = await initPayment(amountToPaid, stripeCustomerId);
+    // ✅ Pass merchantStripeAccountId → destination charge to merchant
+    // Platform keeps (serviceFee + transactionFee + estimatedTaxes).
+    // Merchant receives baseAmount automatically via Stripe Connect.
+    stripeDetails = await initPayment(
+      amountToPaid,
+      stripeCustomerId,
+      "usd",
+      merchantStripeAccountId,
+    );
   }
 
-  // ── ✅ paymentMethod set correctly based on isCash ────────────────────────
   const updateInfo = await LotRentRecordModel.create({
     lotId:             lotDoc._id,
     rentedSlot:        slotId,
@@ -303,9 +317,8 @@ const createABooking = async (
     paymentDetails: {
       status:               "PENDING",
       amountPaidBy:         amountToPaid,
-      // ✅ Only attach Stripe details when not cash
       ...(stripeDetails && { stripePaymentDetails: stripeDetails }),
-      paymentMethod:        isCash ? "CASH" : "STRIPE",  // ✅ correct method
+      paymentMethod:        isCash ? "CASH" : "STRIPE",
     },
   });
 
@@ -328,7 +341,6 @@ const createABooking = async (
       isMonthly,
       months:         isMonthly ? months : undefined,
     },
-    // ✅ Only return stripeDetails if not cash
     ...(stripeDetails && { stripeDetails: updateInfo.paymentDetails.stripePaymentDetails }),
     placeInfo: {
       name:     lotDoc.parkingName,
@@ -432,7 +444,7 @@ export const getAvailableSpace = asyncHandler(async (req, res) => {
   }
 });
 
-// ✅ lotCheckOut — passes isCash to createABooking
+// ✅ lotCheckOut — fetches merchant owner, passes stripeAccountId to createABooking
 export const lotCheckOut = asyncHandler(async (req, res) => {
   try {
     const verifiedAuth = await verifyAuthentication(req);
@@ -440,14 +452,16 @@ export const lotCheckOut = asyncHandler(async (req, res) => {
     const USER: MUserRes = verifiedAuth.user as MUserRes;
 
     const rData = LotCheckOutData.parse(req.body);
-
-    // ✅ Detect cash at checkout time
     const isCash = rData.paymentMethod === "CASH";
 
+    // ✅ Populate owner to access stripeAccountId
     const lot = await ParkingLotModel.findById(rData.lotId).populate<{ owner: IMerchant }>("owner", "-password");
     if (!lot) throw new ApiError(400, "NO LOT FOUND");
 
-    const data = await createABooking(rData, lot as any, USER, isCash); // ✅ pass isCash
+    // ✅ Extract merchant's Stripe Connect account ID (null if not onboarded)
+    const merchantStripeAccountId = (lot.owner as IMerchant).stripeAccountId ?? null;
+
+    const data = await createABooking(rData, lot as any, USER, isCash, merchantStripeAccountId);
     res.status(200).json(new ApiResponse(201, data));
   } catch (error) {
     if (error instanceof z.ZodError) throw new ApiError(400, "INVALID DATA", error.issues);
@@ -456,7 +470,6 @@ export const lotCheckOut = asyncHandler(async (req, res) => {
   }
 });
 
-// ✅ bookASlot — fixed, no double-save, cash stays PENDING
 export const bookASlot = asyncHandler(async (req, res) => {
   let session: mongoose.ClientSession | undefined;
   try {
@@ -493,7 +506,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
     console.log("✅ Rent record found:", rentRecord._id);
     console.log("📋 paymentMethod on record:", rentRecord.paymentDetails?.paymentMethod);
 
-    // ── Slot conflict check ───────────────────────────────────────────────
     console.log("🔍 Checking for existing bookings...");
     session = await LotRentRecordModel.startSession();
     session.startTransaction();
@@ -514,8 +526,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
     if (hasConflict) {
       console.error("❌ Slot conflict detected");
       if (!isCashPayment) {
-        // Only mark FAILED for Stripe — cash stays PENDING
-        // definitive conflict check runs at confirm-cash time
         rentRecord.paymentDetails.status = "FAILED";
         rentRecord.markModified("paymentDetails");
         await rentRecord.save();
@@ -523,9 +533,7 @@ export const bookASlot = asyncHandler(async (req, res) => {
       throw new ApiError(400, "SLOT_NOT_AVAILABLE");
     }
 
-    // ── Save payment details ──────────────────────────────────────────────
     if (!isCashPayment) {
-      // Stripe — confirm immediately
       console.log("✅ No conflict — confirming Stripe booking");
       rentRecord.paymentDetails.status        = "SUCCESS";
       rentRecord.paymentDetails.paidAt        = new Date();
@@ -534,7 +542,6 @@ export const bookASlot = asyncHandler(async (req, res) => {
       await rentRecord.save();
       console.log("✅ Stripe booking saved as SUCCESS");
     } else {
-      // Cash — leave PENDING, merchant confirms via /confirm-cash
       console.log("✅ Cash booking saved as PENDING — awaiting merchant confirmation");
       rentRecord.paymentDetails.paymentMethod = "CASH";
       rentRecord.markModified("paymentDetails");
@@ -600,7 +607,6 @@ export const confirmCashPaymentLot = asyncHandler(async (req: Request, res: Resp
       throw new ApiError(403, "You do not own this parking lot");
     }
 
-    // Final slot conflict check before confirming
     const conflict = await findExistingBooking(
       booking.rentFrom,
       booking.rentTo,
@@ -738,7 +744,6 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
     const skip     = (pageNum - 1) * limitNum;
 
     const filter: mongoose.RootFilterQuery<ILotRecord> = {};
-    // ✅ Show PENDING (cash) and SUCCESS, hide only FAILED
     filter["paymentDetails.status"] = status ? status : { $ne: "FAILED" };
     if (lotId) filter.lotId = lotId;
 
@@ -823,7 +828,7 @@ export const getLotBookingList = asyncHandler(async (req, res) => {
           transactionFee: b.transactionFee,
           estimatedTaxes: b.estimatedTaxes,
           status:         b.paymentDetails.status,
-          method:         b.paymentDetails.paymentMethod, // ✅ "CASH" or "STRIPE"
+          method:         b.paymentDetails.paymentMethod,
           paidAt:         b.paymentDetails.paidAt,
         },
         status:        b.paymentDetails.status,
