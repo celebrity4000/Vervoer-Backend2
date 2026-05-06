@@ -29,7 +29,8 @@ app.use(cors({
     "http://localhost:5173",
     "https://admin-self-seven-79.vercel.app",
     "https://vervoer-merchant-dashboad.vercel.app",
-    "https://merchant-dashboad-oag9tsbb7-uttams-projects-060ae86e.vercel.app"
+    "https://merchant-dashboad.vercel.app",
+    "https://vervoer-backend2.onrender.com"
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
   credentials: true,
