@@ -75,6 +75,12 @@ import {
   disconnectConnectAccount,
 } from "../controllers/merchantStripeConnect.controller.js";
 
+// ── Daily Rate ────────────────────────────────────────────────────────────────
+import {
+  updateDailyRateSettings,
+  getDailyRateSettings,
+} from "../controllers/Dailyrate.controller.js";
+
 const merchantRouter = Router();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,9 +137,9 @@ merchantRouter.post("/garage/booking/:id/extend",               extendGarageBook
 merchantRouter.patch("/garage/booking/:id/extend/confirm",      confirmGarageExtension);
 merchantRouter.patch("/garage/booking/:id/extend/confirm-cash", confirmGarageExtensionCash);
 
-merchantRouter.get("/garage/search",              getListOfGarage);
+merchantRouter.get("/garage/search",               getListOfGarage);
 merchantRouter.get("/api/garage-booking/scan/:id", scanBookingQRCode);
-merchantRouter.get("/garage/:id",                 getGarageDetails);
+merchantRouter.get("/garage/:id",                  getGarageDetails);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // RESIDENCE
@@ -153,15 +159,23 @@ merchantRouter.post("/residence/booking/:id/extend",               extendResiden
 merchantRouter.patch("/residence/booking/:id/extend/confirm",      confirmResidenceExtension);
 merchantRouter.patch("/residence/booking/:id/extend/confirm-cash", confirmResidenceExtensionCash);
 
-merchantRouter.get("/residence/search",         getListOfResidence);
-merchantRouter.get("/residence/:residenceId",   getResidenceById);
+merchantRouter.get("/residence/search",       getListOfResidence);
+merchantRouter.get("/residence/:residenceId", getResidenceById);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MERCHANT-LEVEL ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
-merchantRouter.get("/stats",           getMerchantStats);
+merchantRouter.get("/stats",              getMerchantStats);
 merchantRouter.patch("/monthly-settings", updateMonthlySettings);
 merchantRouter.get("/dry-cleaner-stats",  getDryCleanerStats);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DAILY RATE SETTINGS
+// PATCH /api/merchants/daily-rate-settings              → merchant: update slots
+// GET   /api/merchants/daily-rate-settings/:venueType/:venueId → public: read slots
+// ─────────────────────────────────────────────────────────────────────────────
+merchantRouter.patch("/daily-rate-settings",                        updateDailyRateSettings);
+merchantRouter.get("/daily-rate-settings/:venueType/:venueId",      getDailyRateSettings);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SUB-ACCOUNTS — protected, must come after public routes

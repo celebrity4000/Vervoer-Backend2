@@ -2,6 +2,7 @@ import mongoose, { Document, Schema } from "mongoose";
 import { UserBaseSchemaFields } from "./user.model.js";
 import { BankDetailsSchema, IBankDetails } from "./bankDetails.model.js";
 import { StripeIntentData } from "../utils/stripePayments.js";
+import { IDailyRateSlot, dailyRateSchemaFields } from "./Dailyrate.schema.js";
 
 export interface IMerchant extends Document {
   phoneNumber: string;
@@ -68,6 +69,9 @@ export const Merchant = mongoose.model<IMerchant>(
   "merchants"
 );
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Parking Lot Interface
+ * ────────────────────────────────────────────────────────────────────────── */
 export interface IParking {
   _id: mongoose.Types.ObjectId;
   images: [string];
@@ -81,174 +85,268 @@ export interface IParking {
   price: number;
   about: string;
   spacesList: Map<string, { count: number; price: number }>;
-  generalAvailable: [{
-    day: "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
-    isOpen?: boolean;
-    openTime?: string;
-    closeTime?: string;
-    is24Hours: boolean;
-  }];
+
+  generalAvailable: [
+    {
+      day: "SUN" | "MON" | "TUE" | "WED" | "THU" | "FRI" | "SAT";
+      isOpen?: boolean;
+      openTime?: string;
+      closeTime?: string;
+      is24Hours: boolean;
+    }
+  ];
+
   isMonthly: boolean;
   months?: number;
   vehicleNumber?: string;
   vehicleType: "bike" | "car" | "both";
   is24x7: boolean;
   isActive: boolean;
+
+  // ── Monthly plan ─────────────────────────────────────────
   monthlyChargeEnabled: boolean;
   monthlyRate: number;
+
+  // ── Daily rate ────────────────────────────────────────────
+  dailyRateEnabled: boolean;
+  dailyRates: IDailyRateSlot[];
 }
 
 interface IParkingMethods {
   isOpenNow: () => boolean;
 }
 
-const parkingLotSchema = new mongoose.Schema<IParking, mongoose.Model<IParking>, IParkingMethods>({
-  images: [String],
-  owner: {
-    type: mongoose.Schema.ObjectId,
-    ref: "Merchant"
-  },
-  contactNumber: {
-    type: String,
-    required: true
-  },
-  vehicleType: {
-    type: String,
-    enum: ["bike", "car", "both"],
-    required: true,
-    default: "both"
-  },
-  email: {
-    type: String,
-  },
-  totalSlot: {
-    type: Number,
-  },
-  parkingName: {
-    type: String,
-    required: true
-  },
-  address: {
-    type: String,
-    required: true
-  },
-  gpsLocation: {
-    type: {
-      type: String,
-      enum: "Point",
-      default: "Point",
+/* ──────────────────────────────────────────────────────────────────────────
+ * Parking Lot Schema
+ * ────────────────────────────────────────────────────────────────────────── */
+const parkingLotSchema = new mongoose.Schema<
+  IParking,
+  mongoose.Model<IParking>,
+  IParkingMethods
+>(
+  {
+    images: [String],
+
+    owner: {
+      type: mongoose.Schema.ObjectId,
+      ref: "Merchant",
     },
-    coordinates: {
-      type: [Number],
+
+    contactNumber: {
+      type: String,
       required: true,
     },
-  },
-  price: {
-    type: Number,
-    required: true,
-  },
-  about: {
-    type: String,
-    required: true,
-  },
-  spacesList: {
-    type: mongoose.Schema.Types.Map,
-    of: new mongoose.Schema(
-      {
-        count: { type: Number, required: true },
-        price: { type: Number, required: true },
-      },
-      { _id: false }
-    ),
-  },
-  generalAvailable: [{
-    day: {
+
+    vehicleType: {
       type: String,
-      enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
-      required: true
+      enum: ["bike", "car", "both"],
+      required: true,
+      default: "both",
     },
-    isOpen: {
-      type: Boolean,
-      default: true
+
+    email: {
+      type: String,
     },
-    openTime: String,
-    closeTime: String,
-    is24Hours: {
+
+    totalSlot: {
+      type: Number,
+    },
+
+    parkingName: {
+      type: String,
+      required: true,
+    },
+
+    address: {
+      type: String,
+      required: true,
+    },
+
+    gpsLocation: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+      },
+    },
+
+    price: {
+      type: Number,
+      required: true,
+    },
+
+    about: {
+      type: String,
+      required: true,
+    },
+
+    spacesList: {
+      type: mongoose.Schema.Types.Map,
+      of: new mongoose.Schema(
+        {
+          count: {
+            type: Number,
+            required: true,
+          },
+          price: {
+            type: Number,
+            required: true,
+          },
+        },
+        { _id: false }
+      ),
+    },
+
+    generalAvailable: [
+      {
+        day: {
+          type: String,
+          enum: ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"],
+          required: true,
+        },
+        isOpen: {
+          type: Boolean,
+          default: true,
+        },
+        openTime: String,
+        closeTime: String,
+        is24Hours: {
+          type: Boolean,
+          default: false,
+        },
+      },
+    ],
+
+    is24x7: Boolean,
+
+    isActive: {
       type: Boolean,
-      default: false
-    }
-  }],
-  is24x7: Boolean,
-  isActive: { type: Boolean, default: true },
-  monthlyChargeEnabled: { type: Boolean, default: false },
-  monthlyRate: { type: Number, default: 0 },
-}, {
-  timestamps: true,
-  toJSON: { virtuals: true },
-  toObject: { virtuals: true },
-  methods: {
-    isOpenNow: function () {
-      const now = new Date();
-      const today = now.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase().slice(0, 3);
-      const todayHours = this.generalAvailable.find(ga => ga.day === today);
-      if (!todayHours || !todayHours.isOpen) return false;
-      if (todayHours.is24Hours) return true;
-      const currentTime = now.getHours() * 100 + now.getMinutes();
-      const openTime = parseInt(todayHours.openTime?.replace(':', '') || '0');
-      const closeTime = parseInt(todayHours.closeTime?.replace(':', '') || '0');
-      return currentTime >= openTime && currentTime <= closeTime;
-    }
+      default: true,
+    },
+
+    // ── Monthly plan ─────────────────────────────────────────
+    monthlyChargeEnabled: {
+      type: Boolean,
+      default: false,
+    },
+
+    monthlyRate: {
+      type: Number,
+      default: 0,
+    },
+
+    // ── Daily rate ────────────────────────────────────────────
+    ...dailyRateSchemaFields,
+  },
+  {
+    timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+
+    methods: {
+      isOpenNow: function () {
+        const now = new Date();
+
+        const today = now
+          .toLocaleDateString("en-US", { weekday: "short" })
+          .toUpperCase()
+          .slice(0, 3);
+
+        const todayHours = this.generalAvailable.find(
+          (ga) => ga.day === today
+        );
+
+        if (!todayHours || !todayHours.isOpen) {
+          return false;
+        }
+
+        if (todayHours.is24Hours) {
+          return true;
+        }
+
+        const currentTime = now.getHours() * 100 + now.getMinutes();
+
+        const openTime = parseInt(
+          todayHours.openTime?.replace(":", "") || "0"
+        );
+
+        const closeTime = parseInt(
+          todayHours.closeTime?.replace(":", "") || "0"
+        );
+
+        return currentTime >= openTime && currentTime <= closeTime;
+      },
+    },
   }
-});
+);
 
-parkingLotSchema.index({ gpsLocation: '2dsphere' });
+parkingLotSchema.index({ gpsLocation: "2dsphere" });
 
-// ── Extension subdocument schema ──────────────────────────────────────────────
-// Shared shape used by all three booking models (Lot, Garage, Residence).
-// paymentStatus lifecycle:
-//   CASH   → PENDING (merchant confirms via confirm-cash → SUCCESS)
-//   CREDIT → AWAITING_CONFIRMATION (user confirms via /extend/confirm → SUCCESS)
+/* ──────────────────────────────────────────────────────────────────────────
+ * Extension Subdocument Schema
+ * ────────────────────────────────────────────────────────────────────────── */
 const extensionSchema = new mongoose.Schema(
   {
-    requestedAt:    { type: Date, default: Date.now },
-    extraHours:     { type: Number, required: true },
-    previousTo:     { type: Date, required: true },
-    newTo:          { type: Date, required: true },
-    hourlyRate:     { type: Number, required: true },
-    doubleRate:     { type: Number, required: true },
-    baseAmount:     { type: Number, required: true },
-    serviceFee:     { type: Number, required: true },
+    requestedAt: { type: Date, default: Date.now },
+    extraHours: { type: Number, required: true },
+    previousTo: { type: Date, required: true },
+    newTo: { type: Date, required: true },
+    hourlyRate: { type: Number, required: true },
+    doubleRate: { type: Number, required: true },
+    baseAmount: { type: Number, required: true },
+    serviceFee: { type: Number, required: true },
     transactionFee: { type: Number, required: true },
     estimatedTaxes: { type: Number, required: true },
-    totalAmount:    { type: Number, required: true },
-    paymentMethod:  {
+    totalAmount: { type: Number, required: true },
+
+    paymentMethod: {
       type: String,
       enum: ["CASH", "CREDIT", "UPI"],
       required: true,
     },
+
     paymentStatus: {
       type: String,
       enum: ["PENDING", "AWAITING_CONFIRMATION", "SUCCESS", "FAILED"],
       default: "PENDING",
     },
-    paymentIntentId: { type: String, default: null },
-    activatedAt:     { type: Date, default: null },
+
+    paymentIntentId: {
+      type: String,
+      default: null,
+    },
+
+    activatedAt: {
+      type: Date,
+      default: null,
+    },
+
     stripeDetails: {
       type: new mongoose.Schema(
         {
-          paymentIntent:   { type: String },
-          ephemeralKey:    { type: String },
+          paymentIntent: { type: String },
+          ephemeralKey: String,
           paymentIntentId: { type: String },
-          customerId:      { type: String },
+          customerId: { type: String },
         },
         { _id: false }
       ),
       default: undefined,
     },
   },
-  { _id: true, timestamps: false }
+  {
+    _id: true,
+    timestamps: false,
+  }
 );
 
+/* ──────────────────────────────────────────────────────────────────────────
+ * Lot Rent Record Interface
+ * ────────────────────────────────────────────────────────────────────────── */
 export interface ILotRecord {
   _id: mongoose.Types.ObjectId;
   lotId: mongoose.Types.ObjectId;
@@ -268,7 +366,8 @@ export interface ILotRecord {
   vehicleNumber?: string;
   isMonthly?: boolean;
   months?: number;
-  extensions?: any[];   // ← added
+  extensions?: any[];
+
   paymentDetails: {
     transactionId: string | null;
     paymentMethod: "CASH" | "CREDIT" | "DEBIT" | "STRIPE";
@@ -279,57 +378,159 @@ export interface ILotRecord {
   };
 }
 
-const lotRentRecordSchema = new mongoose.Schema<ILotRecord, mongoose.Model<ILotRecord>>({
-  lotId:      { type: mongoose.Schema.Types.ObjectId, ref: "ParkingLot" },
-  renterInfo: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
-  rentedSlot: { type: String, required: true },
-  rentFrom:   { type: mongoose.Schema.Types.Date, required: true },
-  rentTo:     { type: mongoose.Schema.Types.Date, required: true },
-  totalHours:     { type: Number, required: true },
-  serviceFee:     { type: Number, required: true },
-  transactionFee: { type: Number, required: true },
-  estimatedTaxes: { type: Number, required: true },
-  priceRate:      { type: Number, required: true },
-  totalAmount:    { type: Number, required: true },
-  amountToPaid:   { type: Number, required: true },
-  appliedCouponCode: String,
-  discount:   { type: Number, required: true, default: 0 },
-  vehicleNumber: { type: String, default: null },
-  isMonthly:     { type: Boolean, default: false },
-  months:        { type: Number, default: null },
+/* ──────────────────────────────────────────────────────────────────────────
+ * Lot Rent Record Schema
+ * ────────────────────────────────────────────────────────────────────────── */
+const lotRentRecordSchema = new mongoose.Schema<ILotRecord>(
+  {
+    lotId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "ParkingLot",
+    },
 
-  // ── THE FIX: extensions array ─────────────────────────────────────────────
-  extensions: { type: [extensionSchema], default: [] },
+    renterInfo: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
 
-  paymentDetails: {
-    type: new mongoose.Schema({
-      transactionId: String,
-      paymentMethod: {
-        type: String,
-        enum: ["CASH", "CREDIT", "DEBIT", "STRIPE"],
-        default: "STRIPE",
-      },
-      paidAt: Date,
-      status: {
-        type: String,
-        enum: ["PENDING", "FAILED", "SUCCESS"],
-        default: "PENDING",
-      },
-      amountPaidBy: Number,
-      stripePaymentDetails: {
-        type: new mongoose.Schema({
-          paymentIntent:   { type: String, required: true },
-          ephemeralKey:    String,
-          paymentIntentId: { type: String, required: true },
-        }, { _id: false })
-      }
-    }, { _id: false }),
+    rentedSlot: {
+      type: String,
+      required: true,
+    },
+
+    rentFrom: {
+      type: mongoose.Schema.Types.Date,
+      required: true,
+    },
+
+    rentTo: {
+      type: mongoose.Schema.Types.Date,
+      required: true,
+    },
+
+    totalHours: {
+      type: Number,
+      required: true,
+    },
+
+    serviceFee: {
+      type: Number,
+      required: true,
+    },
+
+    transactionFee: {
+      type: Number,
+      required: true,
+    },
+
+    estimatedTaxes: {
+      type: Number,
+      required: true,
+    },
+
+    priceRate: {
+      type: Number,
+      required: true,
+    },
+
+    totalAmount: {
+      type: Number,
+      required: true,
+    },
+
+    amountToPaid: {
+      type: Number,
+      required: true,
+    },
+
+    appliedCouponCode: String,
+
+    discount: {
+      type: Number,
+      required: true,
+      default: 0,
+    },
+
+    vehicleNumber: {
+      type: String,
+      default: null,
+    },
+
+    isMonthly: {
+      type: Boolean,
+      default: false,
+    },
+
+    months: {
+      type: Number,
+      default: null,
+    },
+
+    // ── Extensions ───────────────────────────────────────────
+    extensions: {
+      type: [extensionSchema],
+      default: [],
+    },
+
+    paymentDetails: {
+      type: new mongoose.Schema(
+        {
+          transactionId: String,
+
+          paymentMethod: {
+            type: String,
+            enum: ["CASH", "CREDIT", "DEBIT", "STRIPE"],
+            default: "STRIPE",
+          },
+
+          paidAt: Date,
+
+          status: {
+            type: String,
+            enum: ["PENDING", "FAILED", "SUCCESS"],
+            default: "PENDING",
+          },
+
+          amountPaidBy: Number,
+
+          stripePaymentDetails: {
+            type: new mongoose.Schema(
+              {
+                paymentIntent: {
+                  type: String,
+                  required: true,
+                },
+                ephemeralKey: String,
+                paymentIntentId: {
+                  type: String,
+                  required: true,
+                },
+              },
+              { _id: false }
+            ),
+          },
+        },
+        { _id: false }
+      ),
+    },
+  },
+  {
+    timestamps: true,
   }
-}, { timestamps: true });
+);
 
-export const ParkingLotModel = mongoose.model<IParking>("ParkingLot", parkingLotSchema);
-export const LotRentRecordModel = mongoose.model<ILotRecord>("LotRentRecord", lotRentRecordSchema);
+/* ──────────────────────────────────────────────────────────────────────────
+ * Models
+ * ────────────────────────────────────────────────────────────────────────── */
+export const ParkingLotModel = mongoose.model<IParking>(
+  "ParkingLot",
+  parkingLotSchema
+);
 
+export const LotRentRecordModel = mongoose.model<ILotRecord>(
+  "LotRentRecord",
+  lotRentRecordSchema
+);
 const addressSchema = new mongoose.Schema({
   street:   { type: String, required: true },
   city:     { type: String, required: true },

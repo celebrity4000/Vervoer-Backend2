@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 import { StripeIntentData } from "../utils/stripePayments.js";
+import { IDailyRateSlot, dailyRateSchemaFields } from "./Dailyrate.schema.js";
 
 export interface IResident {
   _id: mongoose.Types.ObjectId;
@@ -35,6 +36,9 @@ export interface IResident {
   // ── Monthly plan ─────────────────────────────────────────
   monthlyChargeEnabled: boolean;
   monthlyRate: number;
+  // ── Daily rate ────────────────────────────────────────────
+  dailyRateEnabled: boolean;
+  dailyRates: IDailyRateSlot[];
 }
 
 interface ResidentMethods {
@@ -80,6 +84,8 @@ const residenceSchema = new mongoose.Schema<IResident, mongoose.Model<IResident>
     // ── Monthly plan ─────────────────────────────────────────
     monthlyChargeEnabled: { type: Boolean, default: false },
     monthlyRate: { type: Number, default: 0 },
+    // ── Daily rate ────────────────────────────────────────────
+    ...dailyRateSchemaFields,
   },
   {
     timestamps: true,
@@ -105,10 +111,6 @@ residenceSchema.index({ gpsLocation: "2dsphere" });
 export const ResidenceModel = mongoose.model("Residence", residenceSchema);
 
 // ── Extension subdocument schema ──────────────────────────────────────────────
-// Mirrors the shape used by Garage and Lot booking models.
-// paymentStatus lifecycle:
-//   CASH   → PENDING  (merchant confirms via confirm-cash → SUCCESS)
-//   CREDIT → AWAITING_CONFIRMATION  (user confirms via /extend/confirm → SUCCESS)
 const extensionSchema = new mongoose.Schema(
   {
     requestedAt:    { type: Date, default: Date.now },
@@ -165,7 +167,7 @@ export interface IResidenceBooking {
   priceRate: number;
   isMonthly?: boolean;
   months?: number;
-  extensions?: any[];   // ← added
+  extensions?: any[];
   paymentDetails: {
     transactionId?: string;
     amount: number;
@@ -197,7 +199,7 @@ const residenceBookingSchema = new mongoose.Schema<IResidenceBooking>(
     isMonthly: { type: Boolean, default: false },
     months: { type: Number, default: null },
 
-    // ── THE FIX: extensions array ─────────────────────────────────────────
+    // ── extensions array ──────────────────────────────────────────────────
     extensions: { type: [extensionSchema], default: [] },
 
     paymentDetails: {

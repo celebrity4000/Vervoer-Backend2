@@ -17,12 +17,14 @@ interface DateBoundaries {
   startOfDay: Date;
   startOfWeek: Date;
   startOfMonth: Date;
+  startOfYear: Date;
 }
 
 interface PeriodTotals {
   daily: number;
   weekly: number;
   monthly: number;
+  yearly: number;
 }
 
 function getDateBoundaries(): DateBoundaries {
@@ -41,45 +43,55 @@ function getDateBoundaries(): DateBoundaries {
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
   );
 
-  return { now, startOfDay, startOfWeek, startOfMonth };
+  const startOfYear = new Date(
+    Date.UTC(now.getUTCFullYear(), 0, 1)
+  );
+
+  return { now, startOfDay, startOfWeek, startOfMonth, startOfYear };
 }
 
 function aggregateEarnings(
   records: Array<{ paidAt?: Date | null; amount: number }>,
   b: DateBoundaries
 ): PeriodTotals {
-  let daily = 0, weekly = 0, monthly = 0;
+  let daily = 0, weekly = 0, monthly = 0, yearly = 0;
   for (const r of records) {
     if (!r.paidAt) continue;
     const paid = new Date(r.paidAt);
-    if (paid >= b.startOfMonth) {
-      monthly += r.amount;
-      if (paid >= b.startOfWeek) {
-        weekly += r.amount;
-        if (paid >= b.startOfDay) daily += r.amount;
+    if (paid >= b.startOfYear) {
+      yearly += r.amount;
+      if (paid >= b.startOfMonth) {
+        monthly += r.amount;
+        if (paid >= b.startOfWeek) {
+          weekly += r.amount;
+          if (paid >= b.startOfDay) daily += r.amount;
+        }
       }
     }
   }
-  return { daily, weekly, monthly };
+  return { daily, weekly, monthly, yearly };
 }
 
 function aggregateBookingCounts(
   records: Array<{ paidAt?: Date | null }>,
   b: DateBoundaries
 ): PeriodTotals {
-  let daily = 0, weekly = 0, monthly = 0;
+  let daily = 0, weekly = 0, monthly = 0, yearly = 0;
   for (const r of records) {
     if (!r.paidAt) continue;
     const paid = new Date(r.paidAt);
-    if (paid >= b.startOfMonth) {
-      monthly++;
-      if (paid >= b.startOfWeek) {
-        weekly++;
-        if (paid >= b.startOfDay) daily++;
+    if (paid >= b.startOfYear) {
+      yearly++;
+      if (paid >= b.startOfMonth) {
+        monthly++;
+        if (paid >= b.startOfWeek) {
+          weekly++;
+          if (paid >= b.startOfDay) daily++;
+        }
       }
     }
   }
-  return { daily, weekly, monthly };
+  return { daily, weekly, monthly, yearly };
 }
 
 function countCurrentlyBooked(
@@ -352,8 +364,9 @@ export const getMerchantStats = asyncHandler(
         daily:   acc.daily   + v.earnings.daily,
         weekly:  acc.weekly  + v.earnings.weekly,
         monthly: acc.monthly + v.earnings.monthly,
+        yearly:  acc.yearly  + v.earnings.yearly,
       }),
-      { daily: 0, weekly: 0, monthly: 0 }
+      { daily: 0, weekly: 0, monthly: 0, yearly: 0 }
     );
 
     const totalBookings = aggregateBookingCounts(
