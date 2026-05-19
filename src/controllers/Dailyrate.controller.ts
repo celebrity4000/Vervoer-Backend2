@@ -111,6 +111,13 @@ export const updateDailyRateSettings = asyncHandler(
     const Model = modelFor(venueType);
     const venue = await Model.findById(venueId);
     if (!venue) throw new ApiError(404, "VENUE_NOT_FOUND");
+    console.log("venue keys →", Object.keys(venue.toObject()));
+console.log("venue owner-ish fields →", {
+  owner:      venue.owner,
+  merchantId: (venue as any).merchantId,
+  createdBy:  (venue as any).createdBy,
+  merchant:   (venue as any).merchant,
+});
 
     if (venue.owner.toString() !== verifiedAuth.user._id.toString()) {
       throw new ApiError(403, "UNAUTHORIZED_ACCESS");
