@@ -15,29 +15,28 @@
 // ── Example ───────────────────────────────────────────────────────────────────
 //
 //  Slots:
-//    Morning   06:00–12:00  $5    (6 h window)
-//    Afternoon 12:00–18:00  $8    (6 h window)
-//    Evening   18:00–00:00  $10   (6 h window)   ← last slot
+//    Morning   06:00–12:00  ₹200   (6 h window)
+//    Afternoon 12:00–18:00  ₹300   (6 h window)
+//    Evening   18:00–00:00  ₹400   (6 h window)  ← last slot
 //
-//  Booking 09:00 → 23:00  (same day)
-//    Enters Morning   → $5
-//    Enters Afternoon → $8
-//    Enters Evening   → $10
-//    Total = $23
+//  Booking 08:00 → 23:00  (same day)
+//    Enters Morning   → ₹200
+//    Enters Afternoon → ₹300
+//    Enters Evening   → ₹400
+//    Total = ₹900
 //
-//  Booking 09:00 → 02:00  (crosses midnight)
-//    Enters Morning   → $5
-//    Enters Afternoon → $8
-//    Enters Evening   (18:00–00:00) → $10
-//    Stays past 00:00 → last slot repeats as 00:00–06:00 → $10  (same duration)
-//    Total = $33
+//  Booking 08:00 → 03:00  (crosses midnight)
+//    Enters Morning   → ₹200
+//    Enters Afternoon → ₹300
+//    Enters Evening   (18:00–00:00) → ₹400
+//    Past 00:00 → last slot repeats as 00:00–06:00 → ₹400
+//    Total = ₹1300
 //
-//  Booking 22:00 → 14:00 next day
-//    Evening   (22:00–00:00) → $10          today
-//    Evening   (00:00–06:00) → $10  repeat  tonight  (past midnight)
-//    Morning   (06:00–12:00) → $5           tomorrow
-//    Afternoon (12:00–14:00) → $8  (entered, full flat fee)
-//    Total = $33
+//  Single slot: Morning 06:00–10:00 ₹200, booking 08:00–15:00
+//    Enters Morning (06–10) → ₹200, cursor → 10:00
+//    Repeat window  (10–14) → ₹200, cursor → 14:00
+//    Repeat window  (14–18) → ₹200, cursor → 15:00 (bookingTo)
+//    Total = ₹600
 // ─────────────────────────────────────────────────────────────────────────────
 
 import mongoose from "mongoose";
@@ -66,7 +65,7 @@ export const dailyRateSlotSchema = new mongoose.Schema<IDailyRateSlot>(
 
 // ── Venue-level fields ────────────────────────────────────────────────────────
 //
-// Spread into parkingLotSchema / garageSchema / residenceSchema after monthlyRate:
+// Spread into parkingLotSchema / garageSchema / residenceSchema:
 //
 //   ...dailyRateSchemaFields,
 //
@@ -85,7 +84,7 @@ export const dailyRateSchemaFields = {
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** "HH:MM" → minutes since midnight.  "00:00" used as an END time = 1440. */
+/** "HH:MM" → minutes since midnight. "00:00" used as an END time = 1440. */
 function toMins(hhmm: string, asEnd = false): number {
   const [h, m] = hhmm.split(":").map(Number);
   const v = h * 60 + m;
@@ -99,19 +98,6 @@ function dateMins(d: Date): number {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // computeDailyRateCost
-//
-// Replaces  totalHours * basePrice  in every checkout handler when
-// dailyRateEnabled === true.
-//
-// Parameters
-//   bookingFrom  – exact booking start (Date)
-//   bookingTo    – exact booking end   (Date)
-//   slots        – merchant's slot array in any order (sorted internally)
-//   (no fallback needed — last slot covers all overflow)
-//
-// Returns
-//   totalAmount  – pre-fee charge
-//   breakdown    – per-slot detail for receipts / debugging
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ISlotBreakdown {
@@ -119,8 +105,8 @@ export interface ISlotBreakdown {
   fromTime:    string;
   toTime:      string;
   price:       number;
-  repetitions: number;  // how many times this slot was charged
-  charged:     number;  // price × repetitions
+  repetitions: number;
+  charged:     number;
 }
 
 export interface IDailyRateCostResult {
@@ -140,16 +126,13 @@ export function computeDailyRateCost(
 
   // Sort slots ascending by fromTime
   const sorted = [...slots].sort((a, b) => toMins(a.fromTime) - toMins(b.fromTime));
-  const lastSlot = sorted[sorted.length - 1];
 
-  const lastFromMins = toMins(lastSlot.fromTime);
-  const lastToMins   = toMins(lastSlot.toTime, true);
-  const slotDurMins  = lastToMins - lastFromMins; // duration of last slot in minutes
+  const lastSlot     = sorted[sorted.length - 1];
+  const lastDurMins  = toMins(lastSlot.toTime, true) - toMins(lastSlot.fromTime);
 
-  // Track charged slots by _id string for accumulation across days
+  // Accumulate charges keyed by slot _id
   const chargeMap = new Map<string, ISlotBreakdown>();
 
-  // Helper: record a charge for a slot
   const charge = (slot: IDailyRateSlot) => {
     const key = slot._id.toString();
     if (chargeMap.has(key)) {
@@ -168,111 +151,79 @@ export function computeDailyRateCost(
     }
   };
 
-  // ── Walk through time, one slot-window at a time ──────────────────────────
-  //
-  // Strategy: maintain a cursor starting at bookingFrom.
-  // At each step, find which slot the cursor falls into (or synthesise a
-  // virtual repeat of the last slot if we're past all defined slots).
-  // Advance the cursor to the end of that slot window.
-  // Charge the flat fee once per slot window entered.
-  //
-  // "00:00" as toTime is treated as 1440 min (end of the calendar day).
-  // All arithmetic is in wall-clock minutes anchored to the cursor's date.
-
-  let cursor = new Date(bookingFrom);
-
-  // Safety valve: max iterations = slots × days + extra repeats
+  // Safety cap
   const maxDays = Math.ceil(
     (bookingTo.getTime() - bookingFrom.getTime()) / 86_400_000
   ) + 2;
   const maxIter = (sorted.length + 10) * (maxDays + 1);
-  let iter = 0;
+
+  let cursor = new Date(bookingFrom);
+  let iter   = 0;
 
   while (cursor < bookingTo && iter++ < maxIter) {
-    // Anchor this iteration to the calendar day the cursor is on
+
     const dayAnchor = new Date(cursor);
     dayAnchor.setHours(0, 0, 0, 0);
 
     const cursorMins = dateMins(cursor);
 
-    // Find which defined slot the cursor currently falls into
-    const matchedSlot = sorted.find((s) => {
+    // ── 1. Cursor falls inside a defined slot ────────────────────────────────
+    const matched = sorted.find((s) => {
       const sf = toMins(s.fromTime);
       const st = toMins(s.toTime, true);
       return cursorMins >= sf && cursorMins < st;
     });
 
-    if (matchedSlot) {
-      // ── Inside a defined slot ─────────────────────────────────────────────
-      const slotEnd   = toMins(matchedSlot.toTime, true); // mins since midnight
-      const windowEnd = new Date(dayAnchor.getTime() + slotEnd * 60_000);
-
-      // Charge only if booking actually overlaps this window
-      if (cursor < bookingTo && cursor < windowEnd) {
-        charge(matchedSlot);
-      }
-
-      // Advance cursor to the end of this slot (or bookingTo, whichever first)
-      cursor = windowEnd > bookingTo ? bookingTo : windowEnd;
-
-    } else {
-      // ── Cursor is in a gap between defined slots (or before first / after last)
-      //    Find the next slot that starts after the cursor today.
-      const nextSlot = sorted.find((s) => toMins(s.fromTime) > cursorMins);
-
-      if (nextSlot) {
-        // Jump cursor forward to the start of the next slot
-        const nextStart = new Date(dayAnchor.getTime() + toMins(nextSlot.fromTime) * 60_000);
-        cursor = nextStart > bookingTo ? bookingTo : nextStart;
-
-      } else {
-        // ── Cursor is past all defined slots for today ───────────────────────
-        // The LAST slot repeats with the same duration for every overflow window.
-        //
-        // FIX: the original code always computed lastSlotEndOnThisDay from
-        // dayAnchor (midnight of the cursor's *current* calendar day). After
-        // crossing midnight, dayAnchor jumps forward 24 h, making overflowMs
-        // negative → repeatIndex always 0 → cursor never advances → infinite loop.
-        //
-        // Correct approach: find the most recent "last slot end" boundary that
-        // is at or before the cursor, regardless of which calendar day it falls on.
-
-        // End of the last defined slot on the cursor's current calendar day
-        const lastSlotEndToday = new Date(
-          dayAnchor.getTime() + lastToMins * 60_000
-        );
-
-        // If the cursor is before that boundary, the slot actually ended on the
-        // previous calendar day — step back one day.
-        const referenceEnd =
-          cursor >= lastSlotEndToday
-            ? lastSlotEndToday
-            : new Date(lastSlotEndToday.getTime() - 86_400_000);
-
-        // How many minutes has the cursor gone past the reference end?
-        const overflowMins = (cursor.getTime() - referenceEnd.getTime()) / 60_000;
-
-        // Which repeat window (0-based) does the cursor fall into?
-        const repeatIndex = Math.floor(overflowMins / slotDurMins);
-
-        // End of the current repeat window
-        const windowEnd = new Date(
-          referenceEnd.getTime() + (repeatIndex + 1) * slotDurMins * 60_000
-        );
-
-        if (cursor < bookingTo) {
-          charge(lastSlot);
-        }
-
-        cursor = windowEnd > bookingTo ? bookingTo : windowEnd;
-      }
+    if (matched) {
+      const slotEnd = new Date(
+        dayAnchor.getTime() + toMins(matched.toTime, true) * 60_000
+      );
+      charge(matched);
+      cursor = slotEnd < bookingTo ? slotEnd : bookingTo;
+      continue;
     }
+
+    // ── 2. Cursor is in a gap before a later slot today ──────────────────────
+    const nextSlot = sorted.find((s) => toMins(s.fromTime) > cursorMins);
+
+    if (nextSlot) {
+      // No charge for the gap — jump straight to the next slot's start
+      const nextStart = new Date(
+        dayAnchor.getTime() + toMins(nextSlot.fromTime) * 60_000
+      );
+      cursor = nextStart < bookingTo ? nextStart : bookingTo;
+      continue;
+    }
+
+    // ── 3. Cursor is past ALL defined slots ──────────────────────────────────
+    // Repeat the last slot in successive windows of its own duration,
+    // anchored from the cursor's CURRENT position (not from lastSlotFromMins).
+    //
+    // Why cursor-anchored?
+    //   If we anchor to lastSlotFromMins we get a fractional window index
+    //   whenever the cursor doesn't land exactly on a window boundary (e.g.
+    //   because the booking started mid-slot). That produces wrong repeat
+    //   counts and occasionally an infinite loop.
+    //
+    //   Anchoring to cursor means: "charge once, advance by one slot-width,
+    //   repeat." Each iteration is exactly one charge + one full advance.
+    //
+    // Example — Morning 06:00–10:00 (240 min), booking 08:00–15:00:
+    //   Step 1 → 08:00 inside slot → charge ₹200, cursor = 10:00
+    //   Step 3 → cursor = 10:00, windowEnd = 10:00 + 240 min = 14:00
+    //            charge ₹200, cursor = 14:00
+    //   Step 3 → cursor = 14:00, windowEnd = 14:00 + 240 min = 18:00
+    //            charge ₹200, cursor = 15:00 (bookingTo)
+    //   Total = ₹600  ✓
+    const windowEnd = new Date(cursor.getTime() + lastDurMins * 60_000);
+    charge(lastSlot);
+    cursor = windowEnd < bookingTo ? windowEnd : bookingTo;
   }
 
-  const totalAmount = [...chargeMap.values()].reduce((s, e) => s + e.charged, 0);
+  const totalAmount = [...chargeMap.values()].reduce(
+    (sum, e) => sum + e.charged,
+    0
+  );
 
-  return {
-    totalAmount,
-    breakdown: [...chargeMap.values()],
-  };
+  return { totalAmount, breakdown: [...chargeMap.values()] };
 }
