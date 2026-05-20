@@ -95,15 +95,19 @@ const merchantRouter = Router();
 // Sub-account login
 merchantRouter.post("/sub-account/login", subAccountLogin);
 
-// Stripe Connect
-merchantRouter.post("/connect/onboard", createOrResumeOnboarding);
-merchantRouter.get("/connect/status", getConnectStatus);
-merchantRouter.delete("/connect/disconnect", disconnectConnectAccount);
-
 // ============================================================================
 // ALL ROUTES BELOW REQUIRE AUTHENTICATION
 // ============================================================================
 merchantRouter.use(authenticate);
+
+// ============================================================================
+// STRIPE CONNECT ROUTES (PROTECTED)
+// ============================================================================
+
+// ✅ FIX: Moved AFTER authenticate so req.user is available in the controller
+merchantRouter.post("/connect/onboard", createOrResumeOnboarding);
+merchantRouter.get("/connect/status", getConnectStatus);
+merchantRouter.delete("/connect/disconnect", disconnectConnectAccount);
 
 // ============================================================================
 // PARKING LOT ROUTES
@@ -160,7 +164,7 @@ merchantRouter.patch(
   confirmLotExtensionCash
 );
 
-// Search and details (NOW AUTHENTICATED)
+// Search and details
 merchantRouter.get("/parkinglot/search", getListOfParkingLot);
 merchantRouter.get("/parkinglot/:id", getParkingLotbyId);
 
@@ -219,7 +223,7 @@ merchantRouter.patch(
   confirmGarageExtensionCash
 );
 
-// Search and details (NOW AUTHENTICATED)
+// Search and details
 merchantRouter.get("/garage/search", getListOfGarage);
 merchantRouter.get("/api/garage-booking/scan/:id", scanBookingQRCode);
 merchantRouter.get("/garage/:id", getGarageDetails);
@@ -282,7 +286,7 @@ merchantRouter.patch(
   confirmResidenceExtensionCash
 );
 
-// Search and details (NOW AUTHENTICATED)
+// Search and details
 merchantRouter.get("/residence/search", getListOfResidence);
 merchantRouter.get("/residence/:residenceId", getResidenceById);
 
