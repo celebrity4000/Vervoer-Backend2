@@ -103,6 +103,129 @@ io.on("connection", (socket) => {
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Account deletion page for Google Play Console
+// ─────────────────────────────────────────────────────────────────────────────
+app.get("/delete-account", (req: Request, res: Response) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>Delete Account - Vervoer</title>
+
+      <style>
+        *{
+          margin:0;
+          padding:0;
+          box-sizing:border-box;
+          font-family:Arial,sans-serif;
+        }
+
+        body{
+          background:#f5f5f5;
+          padding:40px 20px;
+          color:#333;
+        }
+
+        .container{
+          max-width:700px;
+          margin:auto;
+          background:#fff;
+          padding:40px;
+          border-radius:12px;
+          box-shadow:0 0 10px rgba(0,0,0,0.1);
+        }
+
+        h1{
+          text-align:center;
+          margin-bottom:20px;
+          color:#111;
+        }
+
+        p{
+          margin-bottom:15px;
+          line-height:1.7;
+          font-size:16px;
+        }
+
+        .email-box{
+          background:#f1f1f1;
+          padding:15px;
+          border-radius:8px;
+          margin-top:20px;
+          text-align:center;
+          font-weight:bold;
+        }
+
+        .btn{
+          display:inline-block;
+          margin-top:25px;
+          padding:12px 24px;
+          background:#000;
+          color:#fff;
+          text-decoration:none;
+          border-radius:8px;
+        }
+
+        .center{
+          text-align:center;
+        }
+
+        ul{
+          margin-top:10px;
+          margin-left:20px;
+          line-height:1.8;
+        }
+      </style>
+    </head>
+
+    <body>
+      <div class="container">
+        <h1>Delete Your Account</h1>
+
+        <p>
+          At Vervoer, we respect your privacy and provide users with the ability
+          to request permanent deletion of their account and personal data.
+        </p>
+
+        <p>
+          If you want to delete your account, please send a request using the email below.
+        </p>
+
+        <div class="email-box">
+          support@vervoerapp.com
+        </div>
+
+        <div class="center">
+          <a
+            href="mailto:support@vervoerapp.com?subject=Account Deletion Request"
+            class="btn"
+          >
+            Request Account Deletion
+          </a>
+        </div>
+
+        <p style="margin-top:30px;">
+          Once your request is received:
+        </p>
+
+        <ul>
+          <li>Your account will be permanently deleted within 7 working days.</li>
+          <li>Your personal information will be removed from our systems.</li>
+          <li>Some legal or transaction-related records may be retained if required by law.</li>
+        </ul>
+
+        <p style="margin-top:25px;">
+          If you have any questions, feel free to contact our support team.
+        </p>
+      </div>
+    </body>
+    </html>
+  `);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Start server
 // ─────────────────────────────────────────────────────────────────────────────
 connectDB()
